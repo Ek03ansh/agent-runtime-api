@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  agent-runtime-api:
+    build: .
+    ports:
+      - "5001:5001"
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount for development (comment out for production)
+      # - ./app:/app/app
+      # - ./main.py:/app/main.py
+      - agent-sessions:/app/sessions
+      - agent-workspaces:/app/workspaces
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  agent-sessions:
+  agent-workspaces:

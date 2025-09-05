@@ -1,0 +1,86 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "playwright-planner": {
+      "type": "local",
+      "command": [
+        "npx",
+        "@playwright/mcp@next",
+        "--browser",
+        "chromium",
+        "--isolated",
+        "--viewport-size=1280,720"
+      ],
+      "enabled": true
+    },
+    "playwright-generator": {
+      "type": "local",
+      "command": [
+        "npx",
+        "@playwright/mcp@next",
+        "--browser",
+        "chromium",
+        "--isolated",
+        "--caps=verify",
+        "--viewport-size=1280,720"
+      ],
+      "enabled": true
+    },
+    "playwright-fixer": {
+      "type": "local",
+      "command": [
+        "npx",
+        "@playwright/mcp@next",
+        "--browser",
+        "chromium"
+      ],
+      "enabled": true
+    }
+  },
+  "tools": {
+    "playwright*": false
+  },
+  "agent": {
+    "playwright-test-planner": {
+      "description": "Use this agent when you need to create comprehensive test scenarios for a web application or website. Examples: <example>Context: User wants to test a new e-commerce checkout flow. user: 'I need test scenarios for our new checkout process at https://mystore.com/checkout' assistant: 'I'll use the web-test-planner agent to navigate to your checkout page and create comprehensive test scenarios.' <commentary>The user needs test planning for a specific web page, so use the web-test-planner agent to explore and create test scenarios.</commentary></example> <example>Context: User has deployed a new feature and wants thorough testing coverage. user: 'Can you help me test our new user dashboard at https://app.example.com/dashboard?' assistant: 'I'll launch the web-test-planner agent to explore your dashboard and develop detailed test scenarios.' <commentary>This requires web exploration and test scenario creation, perfect for the web-test-planner agent.</commentary></example>",
+      "mode": "subagent",
+      "prompt": "{file:.opencode/prompts/playwright-test-planner.md}",
+      "tools": {
+        "playwright-planner*": true,
+        "write": true,
+        "edit": true,
+        "grep": true,
+        "glob": true,
+        "list": true
+      }
+    },
+    "playwright-test-generator": {
+      "description": "Use this agent when you need to create automated browser tests using Playwright. Examples: <example>Context: User wants to test a login flow on their web application. user: 'I need a test that logs into my app at localhost:3000 with username admin@test.com and password 123456, then verifies the dashboard page loads' assistant: 'I'll use the playwright-test-generator agent to create and validate this login test for you' <commentary>The user needs a specific browser automation test created, which is exactly what the playwright-test-generator agent is designed for.</commentary></example> <example>Context: User has built a new checkout flow and wants to ensure it works correctly. user: 'Can you create a test that adds items to cart, proceeds to checkout, fills in payment details, and confirms the order?' assistant: 'I'll use the playwright-test-generator agent to build a comprehensive checkout flow test' <commentary>This is a complex user journey that needs to be automated and tested, perfect for the playwright-test-generator agent.</commentary></example>",
+      "mode": "subagent",
+      "prompt": "{file:.opencode/prompts/playwright-test-generator.md}",
+      "tools": {
+        "playwright-generator*": true,
+        "read": true,
+        "write": true,
+        "edit": true,
+        "grep": true,
+        "glob": true,
+        "list": true
+      }
+    },
+    "playwright-test-fixer": {
+      "description": "Use this agent when you need to debug and fix failing Playwright tests. Examples: <example>Context: A developer has a failing Playwright test that needs to be debugged and fixed. user: 'The login test is failing, can you fix it?' assistant: 'I'll use the playwright-test-fixer agent to debug and fix the failing login test.' <commentary>The user has identified a specific failing test that needs debugging and fixing, which is exactly what the playwright-test-fixer agent is designed for.</commentary></example> <example>Context: After running a test suite, several tests are reported as failing. user: 'Test user-registration.spec.ts is broken after the recent changes' assistant: 'Let me use the playwright-test-fixer agent to investigate and fix the user-registration test.' <commentary>A specific test file is failing and needs debugging, which requires the systematic approach of the playwright-test-fixer agent.</commentary></example>",
+      "mode": "subagent",
+      "prompt": "{file:.opencode/prompts/playwright-test-fixer.md}",
+      "tools": {
+        "playwright-fixer*": true,
+        "read": true,
+        "write": true,
+        "edit": true,
+        "grep": true,
+        "glob": true,
+        "list": true
+      }
+    }
+  }
+}

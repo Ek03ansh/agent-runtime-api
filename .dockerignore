@@ -1,0 +1,52 @@
+# Docker ignore file - exclude development and test files
+
+# Test and development files
+sessions/
+test-results/
+workspaces/
+__pycache__/
+app/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Test scripts
+create_*.py
+test_*.py
+debug_*.py
+monitor_*.py
+setup_*.py
+check_*.py
+get_*.py
+manual_*.py
+rate_*.py
+
+# Configuration and logs
+.env
+*.log
+*.json
+!requirements.txt
+!package.json
+
+# PowerShell scripts
+*.ps1
+
+# Documentation (except README)
+*.md
+!README.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
