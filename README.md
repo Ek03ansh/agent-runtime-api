@@ -1,51 +1,91 @@
 # Agent Runtime API
 
-FastAPI-based Agent Runtime API for TestingAgent2 - orchestrates AI agents for automated test generation.
+FastAPI-based Agent Runtime API with WebSocket streaming support - orchestrates AI agents for automated test generation with real-time monitoring capabilities.
+
+## Features
+
+- 🚀 **FastAPI-based REST API** - Modern, fast, and async web framework
+- 🔌 **WebSocket Streaming** - Real-time task monitoring and debug messages  
+- 🤖 **AI Agent Orchestration** - Coordinates multiple specialized testing agents
+- 🐳 **Docker Ready** - Complete containerization with docker-compose
+- 📊 **Comprehensive Testing** - Built-in API testing and monitoring tools
+- 🏥 **Health Monitoring** - Built-in health checks and status endpoints
 
 ## Project Structure
 
 ```
-agent-runtime-api/
 ├── app/
-│   ├── __init__.py
 │   ├── controllers/           # API route handlers
-│   │   ├── __init__.py
-│   │   └── task_controller.py      # Task management endpoints
+│   │   └── task_controller.py      # Task management + WebSocket endpoints
 │   ├── core/                 # Core configuration and settings
-│   │   ├── __init__.py
 │   │   └── config.py              # Application configuration
 │   ├── models/               # Pydantic models and schemas
-│   │   └── __init__.py            # Task, Configuration, Response models
+│   │   └── __init__.py            # Task, WebSocket, Configuration models
 │   ├── services/             # Business logic layer
-│   │   ├── __init__.py
-│   │   └── agent_service.py       # Agent orchestration service
+│   │   ├── agent_service.py       # Agent orchestration with streaming
+│   │   └── websocket_manager.py   # WebSocket connection management
 │   └── utils/                # Utility functions
-│       ├── __init__.py
 │       └── helpers.py             # Common helper functions
-├── workspaces/               # Task workspace directories
+├── config/                   # OpenCode configuration
+├── bin/                      # Binary files (opencode.exe - not in git)
+├── sessions/                 # Task workspace directories (runtime)
 ├── main.py                   # Application entry point
-├── requirements.txt          # Python dependencies
-└── README.md                # This file
+├── test_agent_api.py        # Comprehensive API testing tool
+├── websocket_client.py      # WebSocket streaming client
+├── requirements.txt         # Python dependencies
+├── Dockerfile              # Docker container definition
+├── docker-compose.yml      # Docker orchestration
+└── DOCKER.md              # Docker deployment guide
 ```
-
-## Architecture
-
-The API follows a clean architecture pattern with clear separation of concerns:
-
-- **Controllers**: Handle HTTP requests and responses, input validation
-- **Services**: Contain business logic and orchestrate agent execution
-- **Models**: Define data structures and API schemas
-- **Core**: Application configuration and settings
-- **Utils**: Common utility functions and helpers
 
 ## Quick Start
 
+### Option 1: Local Development
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
 # Run the API
 python main.py
+
+# Test all APIs
+python test_agent_api.py test
+
+# Create and monitor a task
+python test_agent_api.py create complete
+```
+
+### Option 2: Docker Deployment
+```bash
+# Build and run with Docker Compose
+docker-compose up --build
+
+# Or use the PowerShell script (Windows)
+./docker-build.ps1 rebuild
+```
+
+## API Testing Tool
+
+The `test_agent_api.py` script provides comprehensive testing capabilities:
+
+```bash
+# Test all API endpoints
+python test_agent_api.py test
+
+# Create a task and monitor progress
+python test_agent_api.py create complete
+
+# Interactive mode with all options
+python test_agent_api.py interactive
+
+# Monitor existing task
+python test_agent_api.py monitor <task_id>
+
+# View task logs
+python test_agent_api.py logs <task_id>
+
+# Get help
+python test_agent_api.py help
 ```
 
 The API will be available at:
