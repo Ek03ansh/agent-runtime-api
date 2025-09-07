@@ -23,16 +23,8 @@ class SignInDetails(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
 
-class AzureOpenAiConfig(BaseModel):
-    endpoint: str = Field(..., description="Azure OpenAI endpoint URL")
-    api_key: str = Field(..., description="Azure OpenAI API key")
-    model_name: str = Field(..., description="Model name (e.g., 'gpt-4')")
-    deployment_name: str = Field(..., description="Deployment name")
-    api_version: str = Field(default="2024-02-15-preview", description="API version")
-
 class TaskConfiguration(BaseModel):
     app_url: str = Field(..., description="Target application URL to test")
-    azure_openai: AzureOpenAiConfig = Field(..., description="Azure OpenAI configuration")
     sign_in: Optional[SignInDetails] = Field(default=None, description="Sign-in details if authentication required")
     instructions: Optional[str] = Field(default=None, description="Additional instructions for the agent")
     max_retries: Optional[int] = Field(default=3, description="Maximum number of retries for failed operations")
@@ -51,8 +43,6 @@ class LogEntry(BaseModel):
     exit_code: int = Field(..., description="Command exit code")
     stdout: str = Field(..., description="Standard output")
     stderr: str = Field(..., description="Standard error")
-    azure_resource: str = Field(..., description="Azure resource name")
-    azure_endpoint: str = Field(..., description="Azure endpoint URL")
 
 class SessionFile(BaseModel):
     name: str = Field(..., description="File name")

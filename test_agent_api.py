@@ -123,17 +123,11 @@ def create_task(task_type='complete', session_id=None, app_url=None):
         'session_id': session_id,
         'configuration': {
             'app_url': app_url,
-            'azure_openai': {
-                'endpoint': 'https://apitesting.openai.azure.com.openai.azure.com/',
-                'api_key': '474bd8c287164f39b8f4f5ead57e34ae',
-                'model_name': 'gpt-4.1',
-                'deployment_name': 'gpt-4.1',
-                'api_version': '2024-10-21'
-            }
+            'instructions': 'Generate comprehensive test coverage'
         }
     }
     
-    print(f'� Creating {task_type} task...')
+    print(f'🚀 Creating {task_type} task...')
     print(f'📋 Session ID: {session_id}')
     print(f'🌐 Target URL: {app_url}')
     print(f'⏰ Timestamp: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
@@ -151,12 +145,12 @@ def create_task(task_type='complete', session_id=None, app_url=None):
             
             # Show what will execute based on task type
             if task_type == 'complete':
-                print('\n� Full pipeline will execute:')
+                print('\n🔄 Full pipeline will execute:')
                 print('1. 📝 Agent 1 (playwright-test-planner): Create test plan')
                 print('2. ⚡ Agent 2 (playwright-test-generator): Generate test files')
                 print('3. 🔧 Agent 3 (playwright-test-fixer): Debug and fix tests')
             elif task_type == 'plan':
-                print('\n� Planning phase will execute:')
+                print('\n📋 Planning phase will execute:')
                 print('1. 📋 Agent (playwright-test-planner): Create comprehensive test plan')
             elif task_type == 'generate':
                 print('\n⚡ Generation phase will execute:')
@@ -285,10 +279,18 @@ def get_logs(task_id):
 def show_help():
     """Show usage help"""
     print("""
-🎯 Agent Runtime API Task Creator
+🎯 Agent Runtime API Testing Tool
 
 Usage:
-  python create_google_task.py [task_type] [session_id] [url]
+  python test_agent_api.py [command] [options]
+
+Commands:
+  test          - Test all API endpoints
+  create [type] - Create task (complete, plan, generate, fix)
+  monitor [id]  - Monitor task progress
+  logs [id]     - Get task logs
+  interactive   - Interactive mode
+  help          - Show this help
 
 Task Types:
   complete  - Full pipeline (plan → generate → fix)
@@ -297,12 +299,10 @@ Task Types:
   fix       - Fix existing tests only
 
 Examples:
-  python create_google_task.py
-  python create_google_task.py complete
-  python create_google_task.py plan mysession
-  python create_google_task.py generate mysession https://example.com
-
-Interactive mode: python create_google_task.py interactive
+  python test_agent_api.py test
+  python test_agent_api.py create complete
+  python test_agent_api.py monitor abc123-def456
+  python test_agent_api.py interactive
 """)
 
 def interactive_mode():
@@ -336,57 +336,76 @@ def interactive_mode():
         if monitor_choice in ['y', 'yes']:
             monitor_task(task_id)
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        if sys.argv[1] == 'help' or sys.argv[1] == '--help':
-            show_help()
-        elif sys.argv[1] == 'interactive':
-            interactive_mode()
-        else:
-            # Parse command line arguments
-            task_type = sys.argv[1] if len(sys.argv) > 1 else 'complete'
-            session_id = sys.argv[2] if len(sys.argv) > 2 else None
-            app_url = sys.argv[3] if len(sys.argv) > 3 else None
-            
-            task_id = create_task(task_type, session_id, app_url)
-            
-            if task_id:
-                print(f'\n🔍 Quick Status Check:')
-                print(f'📊 GET http://localhost:5001/tasks/{task_id}')
-                print(f'📄 GET http://localhost:5001/tasks/{task_id}/logs')
-                
-                monitor_choice = input("\n� Monitor task progress? (y/N): ").strip().lower()
-                if monitor_choice in ['y', 'yes']:
-                    monitor_task(task_id)
-    else:
-        # Default behavior - create complete task
-        task_id = create_task()
-        if task_id:
-            monitor_task(task_id)
-
 
 def enhanced_interactive_mode():
     """Enhanced interactive mode with API testing"""
     print("🎯 Interactive Mode")
     print("=" * 40)
     
+    options = {
+        "1": ("Test all API endpoints", test_all_apis),
+        "2": ("Create and monitor a task", interactive_mode),
+        "3": ("Monitor existing task", lambda: monitor_task(input("\n🆔 Enter task ID to monitor: ").strip())),
+        "4": ("View logs for existing task", lambda: get_logs(input("\n🆔 Enter task ID for logs: ").strip()))
+    }
+    
     print("\n📋 What would you like to do?")
-    print("1. Test all API endpoints")
-    print("2. Create and monitor a task")
-    print("3. Monitor existing task")
-    print("4. View logs for existing task")
+    for key, (description, _) in options.items():
+        print(f"{key}. {description}")
     
     choice = input("\nEnter choice (1-4) [2]: ").strip() or "2"
     
-    if choice == "1":
-        test_all_apis()
-    elif choice == "2":
-        interactive_mode()  # Use existing interactive mode
-    elif choice == "3":
-        task_id = input("\n🆔 Enter task ID to monitor: ").strip()
+    if choice in options:
+        _, action = options[choice]
+        action()
+    else:
+        print("❌ Invalid choice")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        command = sys.argv[1].lower()
+        
+        # Dictionary-based command mapping for cleaner logic
+        command_map = {
+            'help': show_help,
+            '--help': show_help,
+            '-h': show_help,
+            'test': test_all_apis,
+            'interactive': enhanced_interactive_mode
+        }
+        
+        if command in command_map:
+            command_map[command]()
+        elif command == 'create':
+            task_type = sys.argv[2] if len(sys.argv) > 2 else 'complete'
+            session_id = sys.argv[3] if len(sys.argv) > 3 else None
+            app_url = sys.argv[4] if len(sys.argv) > 4 else None
+            
+            task_id = create_task(task_type, session_id, app_url)
+            if task_id:
+                print(f'\n🔍 Quick Status Check:')
+                print(f'📊 GET http://localhost:5001/tasks/{task_id}')
+                print(f'📄 GET http://localhost:5001/tasks/{task_id}/logs')
+                
+                monitor_choice = input("\n👀 Monitor task progress? (y/N): ").strip().lower()
+                if monitor_choice in ['y', 'yes']:
+                    monitor_task(task_id)
+        elif command in ['monitor', 'logs']:
+            if len(sys.argv) < 3:
+                print(f"❌ Task ID required for {command}")
+                print(f"Usage: python test_agent_api.py {command} <task_id>")
+            else:
+                task_id = sys.argv[2]
+                if command == 'monitor':
+                    monitor_task(task_id)
+                else:
+                    get_logs(task_id)
+        else:
+            print(f"❌ Unknown command: {command}")
+            show_help()
+    else:
+        # Default behavior - create complete task
+        task_id = create_task()
         if task_id:
             monitor_task(task_id)
-    elif choice == "4":
-        task_id = input("\n🆔 Enter task ID for logs: ").strip()
-        if task_id:
-            get_logs(task_id)

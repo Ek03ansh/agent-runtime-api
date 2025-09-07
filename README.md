@@ -139,13 +139,6 @@ task_request = {
     "task_type": "complete",
     "configuration": {
         "app_url": "https://example.com",
-        "azure_openai": {
-            "endpoint": "https://your-openai.openai.azure.com/",
-            "api_key": "your-api-key",
-            "model_name": "gpt-4",
-            "deployment_name": "gpt-4",
-            "api_version": "2024-02-15-preview"
-        },
         "instructions": "Focus on login and checkout flows"
     }
 }

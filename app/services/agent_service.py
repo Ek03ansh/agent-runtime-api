@@ -236,18 +236,10 @@ class AgentService:
     # Note: _setup_hardcoded_auth_for_task function removed - no longer needed
     # OpenCode automatically uses global auth at ~/.local/share/opencode/auth.json
 
-    def _should_use_session_continuation(self, task_type: TaskType) -> bool:
-        """Determine if task type should use session continuation"""
-        # Now that session_id is required, all tasks can benefit from session continuation
-        # Complete tasks need it for multi-agent workflows
-        # Single-agent tasks (plan, generate, run, fix) can benefit from existing session context
-        return task_type in [TaskType.complete, TaskType.fix, TaskType.generate, TaskType.plan, TaskType.run]
-
     async def _execute_opencode_pipeline(self, task: Task) -> Tuple[bool, str]:
         """Execute the OpenCode pipeline based on task type with proper session management"""
         await self._send_debug(task.id, f"Starting _execute_opencode_pipeline for task {task.id}")
         session_path = Path(task.session_path)
-        use_sessions = self._should_use_session_continuation(task.task_type)
         
         try:
             await self._send_debug(task.id, f"Pre-creating OpenCode session for session_id: {task.session_id}")
@@ -269,25 +261,20 @@ class AgentService:
             await self._send_debug(task.id, "Global auth file will be used automatically")
             
             await self._send_debug(task.id, f"Determining agents for task type: {task.task_type}")
-            await self._send_debug(task.id, f"Session continuation enabled: {use_sessions}")
+            await self._send_debug(task.id, "Session continuation enabled: True")
             
             # Determine which agents to run based on task type
-            agents = []
-            if task.task_type == TaskType.complete:
-                agents = ["playwright-test-planner", "playwright-test-generator", "playwright-test-fixer"]
-            elif task.task_type == TaskType.plan:
-                agents = ["playwright-test-planner"]
-            elif task.task_type == TaskType.generate:
-                agents = ["playwright-test-generator"]
-            elif task.task_type == TaskType.run:
-                agents = ["playwright-test-fixer"]
-            elif task.task_type == TaskType.fix:
-                agents = ["playwright-test-fixer"]
-            else:
-                return False, f"Unknown task type: {task.task_type}"
+            agent_map = {
+                TaskType.complete: ["playwright-test-planner", "playwright-test-generator", "playwright-test-fixer"],
+                TaskType.plan: ["playwright-test-planner"],
+                TaskType.generate: ["playwright-test-generator"],
+                TaskType.run: ["playwright-test-fixer"],
+                TaskType.fix: ["playwright-test-fixer"]
+            }
             
+            agents = agent_map.get(task.task_type, [])
             if not agents:
-                return False, f"No agents configured for task type: {task.task_type}"
+                return False, f"Unknown task type: {task.task_type}"
             
             await self._send_debug(task.id, f"Selected agents: {agents}")
             
@@ -312,21 +299,17 @@ class AgentService:
                 
                 # Create instructions based on task type and app URL
                 app_url = task.configuration.app_url
-                if agent_name == "playwright-test-planner":
-                    instructions = f"create a test plan for '{app_url}'. Save the test plan as `specs/test-plan.md`."
-                elif agent_name == "playwright-test-generator":
-                    if use_sessions and i > 0:
-                        instructions = f"based on the test plan I created, generate comprehensive test source code into `tests/` folder for '{app_url}'."
-                    else:
-                        instructions = f"for each scenario in the generated test plan, perform the scenario and generate the test source code into `tests/` folder."
-                elif agent_name == "playwright-test-fixer":
-                    if task.task_type == TaskType.run:
-                        instructions = f"run tests under `tests/` one by one and make all the tests either pass or marked as failing."
-                    else:
-                        if use_sessions and i > 0:
-                            instructions = f"based on the tests I generated, debug and fix any failing tests under `tests/` until they pass."
-                        else:
-                            instructions = f"debug and fix failing tests under `tests/` one by one until they pass."
+                instructions_map = {
+                    "playwright-test-planner": f"create a test plan for '{app_url}'. Save the test plan as `specs/test-plan.md`.",
+                    "playwright-test-generator": f"generate comprehensive test source code into `tests/` folder for '{app_url}'.",
+                    "playwright-test-fixer": f"debug and fix any failing tests under `tests/` until they pass."
+                }
+                
+                # Special case for 'run' task type with fixer agent
+                if task.task_type == TaskType.run and agent_name == "playwright-test-fixer":
+                    instructions = f"run tests under `tests/` one by one and make all the tests either pass or marked as failing."
+                else:
+                    instructions = instructions_map.get(agent_name, f"execute {agent_name} for {app_url}")
                 
                 # Add custom instructions if provided
                 if task.configuration.instructions:
@@ -357,7 +340,7 @@ class AgentService:
                 await self._send_debug(task.id, f"Working directory: {session_path}", agent=agent_name)
                 await self._send_debug(task.id, f"Using hardcoded GitHub Copilot configuration: {model_identifier}", agent=agent_name)
                 await self._send_debug(task.id, f"Provider: {settings.provider}, Model: {settings.model}, Auth: {settings.auth_type}", agent=agent_name)
-                if use_sessions and opencode_session_id:
+                if opencode_session_id:
                     await self._send_debug(task.id, f"Session continuation: {opencode_session_id}", agent=agent_name)
                 await self._send_debug(task.id, "Command structure: executable + run + -m + model + [--session session_id] + --agent + agent_name + instructions", agent=agent_name)
                 
@@ -475,9 +458,7 @@ class AgentService:
                     auth_file=auth_file_info,
                     exit_code=returncode,
                     stdout=stdout.strip() if stdout else "",
-                    stderr=stderr.strip() if stderr else "",
-                    azure_resource="N/A (GitHub Copilot)",
-                    azure_endpoint="N/A (GitHub Copilot)"
+                    stderr=stderr.strip() if stderr else ""
                 )
                 
                 # Store logs in task for retrieval

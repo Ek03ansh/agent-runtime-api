@@ -63,8 +63,7 @@ class WebSocketManager:
         for websocket in self.connections[task_id]:
             try:
                 await websocket.send_text(json.dumps(event.dict(), default=str))
-            except Exception as e:
-                print(f"DEBUG: Failed to send WebSocket message: {e}")
+            except Exception:
                 disconnected.append(websocket)
         
         # Clean up disconnected clients
@@ -90,8 +89,7 @@ class WebSocketManager:
         for websocket in self.connections[task_id]:
             try:
                 await websocket.send_text(json.dumps(event.dict(), default=str))
-            except Exception as e:
-                print(f"DEBUG: Failed to send status update: {e}")
+            except Exception:
                 disconnected.append(websocket)
         
         # Clean up disconnected clients
@@ -117,8 +115,7 @@ class WebSocketManager:
         for websocket in self.connections[task_id]:
             try:
                 await websocket.send_text(json.dumps(event.dict(), default=str))
-            except Exception as e:
-                print(f"DEBUG: Failed to send completion: {e}")
+            except Exception:
                 disconnected.append(websocket)
         
         # Clean up disconnected clients

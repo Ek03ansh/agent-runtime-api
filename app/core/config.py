@@ -27,13 +27,6 @@ class Settings:
         self.model = "claude-sonnet-4"
         self.auth_type = "hardcoded-oauth"
         
-        # Legacy Azure OpenAI variables (kept for backward compatibility)
-        self.azure_api_key = os.getenv("AZURE_API_KEY")
-        self.azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        self.azure_openai_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
-        self.azure_openai_deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-        self.azure_openai_model = os.getenv("AZURE_OPENAI_MODEL", "gpt-4o")
-        
     @property
     def opencode_available(self) -> bool:
         """Check if OpenCode executable is available"""
