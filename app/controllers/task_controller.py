@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import asyncio
 from pathlib import Path
@@ -8,6 +8,7 @@ import mimetypes
 import zipfile
 import tempfile
 import os
+import json
 
 from app.models import (
     Task, TaskRequest, TaskListResponse, TaskLogsResponse, HealthResponse,

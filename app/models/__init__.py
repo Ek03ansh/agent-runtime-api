@@ -103,3 +103,13 @@ class DebugMessage(BaseModel):
 class StreamEvent(BaseModel):
     event_type: str = Field(..., description="Event type (debug, status, error, complete)")
     data: dict = Field(..., description="Event data")
+
+
+# Auth Models
+class AuthLoginResponse(BaseModel):
+    device_code: Optional[str] = Field(None, description="Device code for GitHub authentication")
+    verification_url: Optional[str] = Field(None, description="URL to complete authentication")
+
+
+class AuthStatusResponse(BaseModel):
+    authenticated: bool = Field(..., description="Whether user is authenticated")

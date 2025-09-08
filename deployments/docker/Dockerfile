@@ -14,7 +14,16 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-venv \
     curl \
+    openssh-server \
+    vim \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure SSH for Azure Web Apps
+RUN mkdir -p /var/run/sshd \
+    && echo 'root:Docker!' | chpasswd \
+    && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's/Port 22/Port 2222/' /etc/ssh/sshd_config
 
 # Create symlinks for python/pip
 RUN ln -sf /usr/bin/python3 /usr/bin/python && \
@@ -37,8 +46,9 @@ COPY ../../.env.docker .env
 COPY ../../opencode.json .
 COPY ../../.opencode/ ./.opencode/
 
-# Create sessions directory
+# Create sessions directory for the app
 RUN mkdir -p sessions
+
 
 # Install OpenCode globally
 RUN npm install -g opencode-ai
@@ -51,12 +61,17 @@ ENV DISPLAY=:99
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-# Expose port
-EXPOSE 5001
+# Expose ports (5001 for app, 2222 for SSH)
+EXPOSE 5001 2222
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5001/health || exit 1
 
-# Run the application
-CMD ["python", "main.py"]
+# Create startup script that runs both SSH and the app
+RUN echo '#!/bin/bash\n\
+service ssh start\n\
+exec python main.py' > /start.sh && chmod +x /start.sh
+
+# Run the startup script
+CMD ["/start.sh"]

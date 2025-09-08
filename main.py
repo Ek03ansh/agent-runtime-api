@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.controllers.task_controller import router as task_router
+from app.controllers.auth_controller import router as auth_router
 from app.utils.helpers import setup_logging, ensure_directory_exists
 
 
@@ -53,6 +54,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(task_router)
+app.include_router(auth_router)
 
 
 @app.get("/")

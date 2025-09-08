@@ -1,20 +1,56 @@
 #!/usr/bin/env python3
 """
 WebSocket Client for Real-time Task Streaming
-Usage: python websocket_client.py <task_id>
+Usage: python websocket_client.py <task_id> [--endpoint <local|deployed|url>]
 """
 import asyncio
 import websockets
 import json
 import sys
+import os
 from datetime import datetime
+
+# Configuration for different environments
+ENDPOINTS = {
+    'local': 'http://localhost:5001',
+    'deployed': 'https://agent-runtime-pw-app.azurewebsites.net'
+}
+
+def get_base_url():
+    """Determine the base URL to use (local or deployed)"""
+    
+    # Check for environment variable first
+    if 'AGENT_API_URL' in os.environ:
+        return os.environ['AGENT_API_URL']
+    
+    # Check for command line argument
+    if '--endpoint' in sys.argv:
+        idx = sys.argv.index('--endpoint')
+        if idx + 1 < len(sys.argv):
+            endpoint_arg = sys.argv[idx + 1]
+            if endpoint_arg in ENDPOINTS:
+                return ENDPOINTS[endpoint_arg]
+            elif endpoint_arg.startswith('http'):
+                return endpoint_arg
+    
+    # Default to local for websocket client (unlike test client which auto-detects)
+    return ENDPOINTS['local']
 
 async def stream_task_logs(task_id):
     """Connect to WebSocket and stream task logs in real-time"""
-    uri = f"ws://localhost:5001/tasks/{task_id}/stream"
+    base_url = get_base_url()
+    
+    # Convert HTTP(S) URL to WebSocket URL
+    if base_url.startswith('https://'):
+        ws_url = base_url.replace('https://', 'wss://')
+    else:
+        ws_url = base_url.replace('http://', 'ws://')
+    
+    uri = f"{ws_url}/tasks/{task_id}/stream"
     
     print(f"🔌 Connecting to WebSocket for task {task_id}...")
-    print(f"📡 URI: {uri}")
+    print(f"🌐 Base URL: {base_url}")
+    print(f"📡 WebSocket URI: {uri}")
     print("=" * 80)
     
     try:
@@ -123,16 +159,20 @@ async def stream_task_logs(task_id):
         print(f"❌ Invalid WebSocket URI: {uri}")
         return False
     except ConnectionRefusedError:
-        print(f"❌ Connection refused. Is the server running on localhost:5001?")
+        print(f"❌ Connection refused. Is the server running at {base_url}?")
         return False
     except Exception as e:
         print(f"❌ WebSocket connection failed: {e}")
         return False
 
 async def main():
-    if len(sys.argv) != 2:
-        print("Usage: python websocket_client.py <task_id>")
-        print("Example: python websocket_client.py abc123-def456-789")
+    if len(sys.argv) < 2:
+        print("Usage: python websocket_client.py <task_id> [--endpoint <local|deployed|url>]")
+        print("Examples:")
+        print("  python websocket_client.py abc123-def456-789")
+        print("  python websocket_client.py abc123-def456-789 --endpoint deployed")
+        print("  python websocket_client.py abc123-def456-789 --endpoint local")
+        print("  python websocket_client.py abc123-def456-789 --endpoint https://my-app.azurewebsites.net")
         return
     
     task_id = sys.argv[1]

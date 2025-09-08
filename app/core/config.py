@@ -10,7 +10,7 @@ load_dotenv()
 def find_opencode_command():
     """Find the correct OpenCode command for the current platform"""
     
-    # For development on Windows, try to find the direct executable path
+    # For development on Windows, use the direct executable path
     if os.name == 'nt':  # Windows (development only)
         try:
             result = subprocess.run("npm config get prefix", 

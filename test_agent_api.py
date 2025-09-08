@@ -1,20 +1,80 @@
 #!/usr/bin/env python3
 """
 Comprehensive Agent Runtime API Testing Tool
-Supports task creation, monitoring, and API testing
+Supports task creation, monitoring, and API testing for both local and deployed endpoints
 """
 import requests
 import json
 import time
 import sys
+import os
 from datetime import datetime
+
+# Configuration for different environments
+ENDPOINTS = {
+    'local': 'http://localhost:5001',
+    'deployed': 'https://agent-runtime-pw-app.azurewebsites.net'
+}
+
+def get_base_url():
+    """Determine the base URL to use (local or deployed)"""
+    
+    # Check for environment variable first
+    if 'AGENT_API_URL' in os.environ:
+        return os.environ['AGENT_API_URL']
+    
+    # Check for command line argument
+    if '--endpoint' in sys.argv:
+        idx = sys.argv.index('--endpoint')
+        if idx + 1 < len(sys.argv):
+            endpoint_arg = sys.argv[idx + 1]
+            if endpoint_arg in ENDPOINTS:
+                return ENDPOINTS[endpoint_arg]
+            elif endpoint_arg.startswith('http'):
+                return endpoint_arg
+    
+    # Auto-detect: try local first, then deployed
+    local_url = ENDPOINTS['local']
+    deployed_url = ENDPOINTS['deployed']
+    
+    try:
+        response = requests.get(f'{local_url}/health', timeout=3)
+        if response.status_code == 200:
+            print(f"🏠 Using LOCAL endpoint: {local_url}")
+            return local_url
+    except:
+        pass
+    
+    print(f"☁️ Using DEPLOYED endpoint: {deployed_url}")
+    return deployed_url
+
+def show_endpoint_info():
+    """Show current endpoint information"""
+    base_url = get_base_url()
+    print(f"🌐 Current endpoint: {base_url}")
+    
+    # Test connectivity
+    try:
+        response = requests.get(f'{base_url}/health', timeout=5)
+        if response.status_code == 200:
+            health_data = response.json()
+            print(f"✅ Endpoint is accessible")
+            print(f"   Status: {health_data.get('status', 'Unknown')}")
+            print(f"   Version: {health_data.get('version', 'Unknown')}")
+        else:
+            print(f"⚠️ Endpoint returned status: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Endpoint not accessible: {str(e)}")
+    print()
 
 def test_all_apis():
     """Test all available API endpoints"""
-    base_url = 'http://localhost:5001'
+    base_url = get_base_url()
     
     print("🔍 Testing All API Endpoints...")
     print("=" * 50)
+    print(f"🌐 Using endpoint: {base_url}")
+    print()
     
     # Test health API
     print(f"\n🏥 Testing Health API...")
@@ -92,8 +152,9 @@ def test_all_apis():
                 
                 # Test WebSocket endpoint (connection test only)
                 print(f"\n🔌 WebSocket Stream Available at:")
-                print(f"   ws://localhost:5001/tasks/{task_id}/stream")
-                print(f"   Use: python websocket_client.py {task_id}")
+                websocket_url = base_url.replace('http://', 'ws://').replace('https://', 'wss://')
+                print(f"   {websocket_url}/tasks/{task_id}/stream")
+                print(f"   Use: python websocket_client.py {task_id} --endpoint {base_url}")
             else:
                 print("   No tasks found - create one to test individual task APIs")
         else:
@@ -107,6 +168,7 @@ def test_all_apis():
 
 def create_task(task_type='complete', session_id=None, app_url=None):
     """Create a task with flexible options"""
+    base_url = get_base_url()
     
     # Default session ID with timestamp if not provided
     if not session_id:
@@ -117,7 +179,7 @@ def create_task(task_type='complete', session_id=None, app_url=None):
     if not app_url:
         app_url = 'https://demo.playwright.dev/todomvc/#/'
     
-    url = 'http://localhost:5001/tasks'
+    url = f'{base_url}/tasks'
     data = {
         'task_type': task_type,
         'session_id': session_id,
@@ -172,7 +234,10 @@ def create_task(task_type='complete', session_id=None, app_url=None):
 
 def monitor_task(task_id):
     """Monitor task progress with real-time updates"""
+    base_url = get_base_url()
+    
     print(f'\n👀 Monitoring task {task_id}...')
+    print(f'🌐 Using endpoint: {base_url}')
     print('Choose monitoring method:')
     print('1. Polling (HTTP requests every 3 seconds)')
     print('2. WebSocket streaming (real-time)')
@@ -181,8 +246,10 @@ def monitor_task(task_id):
     
     if choice == "2":
         print('\n🔌 Starting WebSocket streaming...')
+        websocket_url = base_url.replace('http://', 'ws://').replace('https://', 'wss://')
+        print(f'WebSocket URL: {websocket_url}/tasks/{task_id}/stream')
         print(f'Run this command in another terminal for real-time logs:')
-        print(f'python websocket_client.py {task_id}')
+        print(f'python websocket_client.py {task_id} --endpoint {base_url}')
         print('\nFalling back to polling for status updates...')
     
     print('Press Ctrl+C to stop monitoring\n')
@@ -193,7 +260,7 @@ def monitor_task(task_id):
     try:
         while True:
             try:
-                response = requests.get(f'http://localhost:5001/tasks/{task_id}', timeout=10)
+                response = requests.get(f'{base_url}/tasks/{task_id}', timeout=10)
                 if response.status_code == 200:
                     task = response.json()
                     status = task.get('status')
@@ -231,8 +298,10 @@ def monitor_task(task_id):
 
 def get_logs(task_id):
     """Get detailed logs for a task"""
+    base_url = get_base_url()
+    
     try:
-        response = requests.get(f'http://localhost:5001/tasks/{task_id}/logs', timeout=10)
+        response = requests.get(f'{base_url}/tasks/{task_id}/logs', timeout=10)
         if response.status_code == 200:
             logs_data = response.json()
             logs = logs_data.get('logs', [])
@@ -282,7 +351,7 @@ def show_help():
 🎯 Agent Runtime API Testing Tool
 
 Usage:
-  python test_agent_api.py [command] [options]
+  python test_agent_api.py [command] [options] [--endpoint <url>]
 
 Commands:
   test          - Test all API endpoints
@@ -292,6 +361,17 @@ Commands:
   interactive   - Interactive mode
   help          - Show this help
 
+Endpoint Options:
+  --endpoint local     - Use http://localhost:5001
+  --endpoint deployed  - Use https://agent-runtime-pw-app.azurewebsites.net
+  --endpoint <url>     - Use custom URL
+
+Environment Variable:
+  AGENT_API_URL=<url>  - Set default endpoint
+
+Auto-detection:
+  If no endpoint specified, tries local first, then deployed
+
 Task Types:
   complete  - Full pipeline (plan → generate → fix)
   plan      - Create test plan only
@@ -300,15 +380,22 @@ Task Types:
 
 Examples:
   python test_agent_api.py test
-  python test_agent_api.py create complete
-  python test_agent_api.py monitor abc123-def456
-  python test_agent_api.py interactive
+  python test_agent_api.py create complete --endpoint deployed
+  python test_agent_api.py monitor abc123-def456 --endpoint local
+  python test_agent_api.py interactive --endpoint deployed
+  
+  # Using environment variable
+  set AGENT_API_URL=https://agent-runtime-pw-app.azurewebsites.net
+  python test_agent_api.py test
 """)
 
 def interactive_mode():
     """Interactive task creation"""
+    base_url = get_base_url()
+    
     print("🎯 Interactive Task Creator")
     print("=" * 40)
+    print(f"🌐 Using endpoint: {base_url}")
     
     # Choose task type
     print("\n📋 Select task type:")
@@ -363,6 +450,10 @@ def enhanced_interactive_mode():
 
 
 if __name__ == "__main__":
+    # Show endpoint info for all commands except help
+    if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1].lower() not in ['help', '--help', '-h']):
+        show_endpoint_info()
+    
     if len(sys.argv) > 1:
         command = sys.argv[1].lower()
         
@@ -385,8 +476,8 @@ if __name__ == "__main__":
             task_id = create_task(task_type, session_id, app_url)
             if task_id:
                 print(f'\n🔍 Quick Status Check:')
-                print(f'📊 GET http://localhost:5001/tasks/{task_id}')
-                print(f'📄 GET http://localhost:5001/tasks/{task_id}/logs')
+                print(f'📊 GET {base_url}/tasks/{task_id}')
+                print(f'📄 GET {base_url}/tasks/{task_id}/logs')
                 
                 monitor_choice = input("\n👀 Monitor task progress? (y/N): ").strip().lower()
                 if monitor_choice in ['y', 'yes']:
@@ -406,6 +497,7 @@ if __name__ == "__main__":
             show_help()
     else:
         # Default behavior - create complete task
+        show_endpoint_info()
         task_id = create_task()
         if task_id:
             monitor_task(task_id)
