@@ -26,17 +26,69 @@ FastAPI-based Agent Runtime API with WebSocket streaming support - orchestrates 
 │   │   └── websocket_manager.py   # WebSocket connection management
 │   └── utils/                # Utility functions
 │       └── helpers.py             # Common helper functions
-├── config/                   # OpenCode configuration
-├── bin/                      # Binary files (opencode.exe - not in git)
 ├── sessions/                 # Task workspace directories (runtime)
 ├── main.py                   # Application entry point
+├── setup_check.py           # Setup verification script
 ├── test_agent_api.py        # Comprehensive API testing tool
 ├── websocket_client.py      # WebSocket streaming client
 ├── requirements.txt         # Python dependencies
+├── package.json            # Node.js dependencies and scripts
 ├── Dockerfile              # Docker container definition
 ├── docker-compose.yml      # Docker orchestration
+├── DEVELOPMENT.md          # Development setup guide
 └── DOCKER.md              # Docker deployment guide
 ```
+
+## Prerequisites
+
+Before running the Agent Runtime API, you need to install OpenCode:
+
+### Install OpenCode
+
+Choose one of the following methods:
+
+```bash
+# Option 1: Using npm setup script (recommended)
+npm run setup
+
+# Option 2: Manual installation with npm
+npm install -g opencode-ai
+
+# Option 3: Other package managers
+npm run setup:bun    # Uses bun
+npm run setup:pnpm   # Uses pnpm  
+npm run setup:yarn   # Uses yarn
+
+# Option 4: Homebrew (macOS/Linux)
+brew install sst/tap/opencode
+
+# Option 5: Install script
+curl -fsSL https://opencode.ai/install | bash
+```
+
+Verify the installation:
+```bash
+npm run verify
+# or
+opencode --version
+```
+
+### Setup Verification
+
+Run the comprehensive setup check:
+```bash
+npm run check
+# or  
+python setup_check.py
+```
+
+This will verify:
+- ✅ Python dependencies are installed
+- ✅ OpenCode is accessible 
+- ✅ Configuration is valid
+- ✅ OpenCode config file exists
+
+> **📚 For detailed setup instructions, see [DEVELOPMENT.md](DEVELOPMENT.md)**
 
 ## Quick Start
 
@@ -46,22 +98,58 @@ FastAPI-based Agent Runtime API with WebSocket streaming support - orchestrates 
 pip install -r requirements.txt
 
 # Run the API
+npm run dev
+# or
 python main.py
 
 # Test all APIs
+npm run test
+# or
 python test_agent_api.py test
 
 # Create and monitor a task
+npm run test:create
+# or
 python test_agent_api.py create complete
 ```
 
 ### Option 2: Docker Deployment
+
+#### Quick Deployment
+```bash
+# Linux/macOS
+./deploy.sh
+
+# Windows PowerShell
+./deploy.ps1
+
+# Manual Docker commands
+docker build -t agent-runtime-api .
+docker run -d --name agent-runtime-api -p 5001:5001 agent-runtime-api
+```
+
+#### Production Deployment
+```bash
+# Build production image
+docker build -t agent-runtime-api:prod .
+
+# Run with environment variables
+docker run -d \
+  --name agent-runtime-api-prod \
+  -p 5001:5001 \
+  -e DEBUG=false \
+  -e CORS_ORIGINS="https://yourdomain.com" \
+  --restart unless-stopped \
+  agent-runtime-api:prod
+```
+
+#### Docker Compose (Alternative)
 ```bash
 # Build and run with Docker Compose
 docker-compose up --build
 
-# Or use the PowerShell script (Windows)
-./docker-build.ps1 rebuild
+# Production mode
+docker-compose -f docker-compose.prod.yml up --build
 ```
 
 ## API Testing Tool
@@ -120,9 +208,8 @@ The API will be available at:
 The API can be configured via environment variables:
 
 - `WORKSPACE_ROOT`: Directory for task workspaces (default: "./workspaces")
-- `OPENCODE_PATH`: Path to OpenCode executable (default: "./bin/opencode.exe")
-- `OPENCODE_CONFIG_PATH`: Path to OpenCode configuration file (default: "./config/opencode.json")
-- `OPENCODE_PROMPTS_PATH`: Path to OpenCode prompts directory (default: "./config/.opencode")
+- `OPENCODE_COMMAND`: OpenCode command (default: "opencode")
+- `OPENCODE_CONFIG_PATH`: Path to OpenCode configuration file (default: "./opencode.json")
 - `HOST`: Server host (default: "0.0.0.0")
 - `PORT`: Server port (default: "5001")
 - `DEBUG`: Enable debug mode (default: "false")

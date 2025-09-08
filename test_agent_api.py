@@ -42,7 +42,7 @@ def test_all_apis():
             print(f"   Provider: {config_data.get('provider')}")
             print(f"   Model: {config_data.get('model')}")
             print(f"   Auth Type: {config_data.get('auth_type')}")
-            print(f"   OpenCode Path: {config_data.get('opencode_path')}")
+            print(f"   OpenCode Command: {config_data.get('opencode_command')}")
             print(f"   Available Task Types: {config_data.get('available_task_types')}")
         else:
             print(f"❌ Config API failed: {config_response.status_code}")

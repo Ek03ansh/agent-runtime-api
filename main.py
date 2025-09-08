@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     setup_logging()
     ensure_directory_exists(settings.session_root)
     print(f"Agent Runtime API started. Sessions: {settings.session_root}")
-    print(f"OpenCode path: {settings.opencode_path}")
+    print(f"OpenCode command: {settings.opencode_command}")
     print(f"OpenCode available: {settings.opencode_available}")
     
     yield

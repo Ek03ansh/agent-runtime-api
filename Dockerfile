@@ -20,17 +20,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app/ ./app/
 COPY main.py .
-COPY .env .
-
-# Copy OpenCode binary and configuration
-COPY bin/ ./bin/
-COPY config/ ./config/
+COPY .env.production .env
 
 # Create sessions directory
 RUN mkdir -p sessions
 
-# Make OpenCode executable
-RUN chmod +x ./bin/opencode.exe || true
+# Install OpenCode globally
+RUN npm install -g opencode-ai
 
 # Expose port
 EXPOSE 5001

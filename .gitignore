@@ -54,7 +54,3 @@ Thumbs.db
 
 # Sessions (runtime generated)
 /sessions/
-
-# Large binary files (>100MB GitHub limit)
-/bin/opencode.exe
-opencode-windows.zip

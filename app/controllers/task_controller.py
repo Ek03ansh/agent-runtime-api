@@ -161,7 +161,7 @@ async def get_configuration():
         "provider": settings.provider,
         "model": settings.model,
         "auth_type": settings.auth_type,
-        "opencode_path": str(settings.opencode_path),
+        "opencode_command": settings.opencode_command,
         "opencode_available": settings.opencode_available,
         "session_root": str(settings.session_root),
         "environment": "production" if not settings.debug else "development",
