@@ -52,11 +52,11 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Expose port
-EXPOSE 5002
+EXPOSE 5001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5002/health || exit 1
+    CMD curl -f http://localhost:5001/health || exit 1
 
 # Run the application
 CMD ["python", "main.py"]

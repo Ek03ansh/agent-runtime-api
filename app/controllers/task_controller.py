@@ -143,6 +143,24 @@ async def cancel_task(task_id: str) -> Task:
     return task
 
 # Session-based endpoints
+@router.get("/sessions", response_model=List[str])
+async def get_sessions() -> List[str]:
+    """Get list of all available sessions"""
+    from app.core.config import settings
+    
+    sessions = []
+    session_root = settings.session_root
+    
+    # Search for sessions across all app directories
+    for app_dir in session_root.glob("app-*"):
+        if app_dir.is_dir():
+            # Each subdirectory in app-* is a session
+            for session_dir in app_dir.iterdir():
+                if session_dir.is_dir():
+                    sessions.append(session_dir.name)
+    
+    return sorted(list(set(sessions)))  # Remove duplicates and sort
+
 @router.get("/sessions/{session_id}/files", response_model=List[SessionFile])
 async def get_session_files_by_session_id(session_id: str) -> List[SessionFile]:
     """Get files in session by session ID"""
