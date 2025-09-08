@@ -22,14 +22,18 @@ RUN ln -sf /usr/bin/python3 /usr/bin/python && \
 
 # Copy requirements first for better caching
 COPY ../../requirements.txt .
+COPY ../../package.json .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Node.js dependencies (including Playwright Test)
+RUN npm install
+
 # Copy application code
 COPY ../../app/ ./app/
 COPY ../../main.py .
-COPY ../../.env.production .env
+COPY ../../.env.docker .env
 COPY ../../opencode.json .
 COPY ../../.opencode/ ./.opencode/
 
@@ -39,17 +43,20 @@ RUN mkdir -p sessions
 # Install OpenCode globally
 RUN npm install -g opencode-ai
 
+# Verify Playwright installation (browsers are already in the base image)
+RUN npx playwright --version
+
 # Set environment variables for headless browsers
 ENV DISPLAY=:99
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Expose port
-EXPOSE 5001
+EXPOSE 5002
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5001/health || exit 1
+    CMD curl -f http://localhost:5002/health || exit 1
 
 # Run the application
 CMD ["python", "main.py"]

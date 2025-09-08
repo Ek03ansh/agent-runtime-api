@@ -256,6 +256,7 @@ class AgentService:
                 "run", 
                 "-m", model_identifier,
                 "--agent", primary_agent,
+                "--log-level", "DEBUG",
                 instructions
             ]
             await self._send_debug(task.id, f"Using {primary_agent} agent for {task.task_type} workflow", agent=primary_agent)

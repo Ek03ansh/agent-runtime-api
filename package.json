@@ -19,6 +19,7 @@
   "description": "Agent Runtime API for OpenCode with Playwright MCP integration",
   "devDependencies": {
     "@playwright/test": "1.56.0-alpha-2025-09-02",
+    "@playwright/mcp": "next",
     "@types/node": "^24.3.0"
   }
 }

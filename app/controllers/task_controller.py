@@ -1,7 +1,13 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, PlainTextResponse
 from typing import List
 from datetime import datetime
 import asyncio
+from pathlib import Path
+import mimetypes
+import zipfile
+import tempfile
+import os
 
 from app.models import (
     Task, TaskRequest, TaskListResponse, TaskLogsResponse, HealthResponse,
@@ -136,15 +142,158 @@ async def cancel_task(task_id: str) -> Task:
     task = await agent_service.get_task(task_id)
     return task
 
-@router.get("/tasks/{task_id}/session/files", response_model=List[SessionFile])
-async def get_session_files(task_id: str) -> List[SessionFile]:
-    """Get files in task session"""
-    task = await agent_service.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+# Session-based endpoints
+@router.get("/sessions/{session_id}/files", response_model=List[SessionFile])
+async def get_session_files_by_session_id(session_id: str) -> List[SessionFile]:
+    """Get files in session by session ID"""
+    from app.core.config import settings
     
-    files = await agent_service.get_session_files(task_id)
+    # Find session path using session directory structure
+    session_root = settings.session_root
+    session_path = None
+    
+    # Search for session across all app directories
+    for app_dir in session_root.glob("app-*"):
+        potential_path = app_dir / session_id
+        if potential_path.exists():
+            session_path = potential_path
+            break
+    
+    if not session_path:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Reuse the existing file listing logic
+    files = []
+    for file_path in session_path.rglob("*"):
+        if file_path.is_file():
+            # Skip node_modules to match ZIP download behavior
+            if 'node_modules' in file_path.parts:
+                continue
+                
+            stat = file_path.stat()
+            relative_path = file_path.relative_to(session_path)
+            
+            files.append(SessionFile(
+                name=file_path.name,
+                path=str(relative_path),
+                size=stat.st_size,
+                modified=datetime.fromtimestamp(stat.st_mtime),
+                type="file"
+            ))
+    
     return files
+
+@router.get("/sessions/{session_id}/files/{file_path:path}")
+async def download_session_file_by_session_id(session_id: str, file_path: str):
+    """Download a specific file from session by session ID"""
+    from app.core.config import settings
+    
+    # Find session path
+    session_root = settings.session_root
+    session_path = None
+    
+    # Search for session across all app directories
+    for app_dir in session_root.glob("app-*"):
+        potential_path = app_dir / session_id
+        if potential_path.exists():
+            session_path = potential_path
+            break
+    
+    if not session_path:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Construct full file path
+    full_file_path = session_path / file_path
+    
+    # Security check: ensure file is within session directory
+    try:
+        full_file_path.resolve().relative_to(session_path.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: file outside session directory")
+    
+    # Check if file exists
+    if not full_file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    if not full_file_path.is_file():
+        raise HTTPException(status_code=400, detail="Path is not a file")
+    
+    # Determine content type
+    content_type, _ = mimetypes.guess_type(str(full_file_path))
+    
+    # For text files, return as plain text to display in browser
+    if content_type and content_type.startswith('text/'):
+        try:
+            with open(full_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return PlainTextResponse(content=content, media_type=content_type)
+        except UnicodeDecodeError:
+            # Fall back to file download if can't read as text
+            pass
+    
+    # For other files or if text reading failed, return as file download
+    return FileResponse(
+        path=str(full_file_path),
+        filename=full_file_path.name,
+        media_type=content_type or 'application/octet-stream'
+    )
+
+@router.get("/sessions/{session_id}/download")
+async def download_session_zip_by_session_id(session_id: str):
+    """Download complete session folder as ZIP file by session ID"""
+    import zipfile
+    import tempfile
+    from app.core.config import settings
+    
+    # Find session path
+    session_root = settings.session_root
+    session_path = None
+    
+    # Search for session across all app directories
+    for app_dir in session_root.glob("app-*"):
+        potential_path = app_dir / session_id
+        if potential_path.exists():
+            session_path = potential_path
+            break
+    
+    if not session_path:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if not session_path.exists():
+        raise HTTPException(status_code=404, detail="Session directory not found")
+    
+    # Create temporary ZIP file
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    zip_path = temp_zip.name
+    temp_zip.close()
+    
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Add all files from session directory
+            for file_path in session_path.rglob("*"):
+                if file_path.is_file():
+                    # Skip node_modules to reduce file size
+                    if 'node_modules' in file_path.parts:
+                        continue
+                    
+                    # Get relative path from session root
+                    relative_path = file_path.relative_to(session_path)
+                    zipf.write(file_path, relative_path)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"session_{session_id}_{timestamp}.zip"
+        
+        return FileResponse(
+            path=zip_path,
+            filename=filename,
+            media_type='application/zip'
+        )
+        
+    except Exception as e:
+        # Clean up temp file on error
+        Path(zip_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create ZIP: {str(e)}")
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
