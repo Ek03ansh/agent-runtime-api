@@ -2,17 +2,19 @@ import asyncio
 import os
 import uuid
 import subprocess
-import sys
+import logging
+import shutil
+import concurrent.futures
+import hashlib
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Fix for Windows subprocess support
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
 from app.models import Task, TaskType, TaskStatus, TaskConfiguration, LogEntry, SessionFile
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Constants
 OPENCODE_TIMEOUT_SECONDS = 3600  # 1 hour
@@ -49,17 +51,103 @@ class AgentService:
         try:
             await self.websocket_manager.send_debug_message(task_id, level, message, agent)
         except Exception as e:
-            print(f"DEBUG: Failed to send WebSocket message: {e}")
+            logger.warning(f"Failed to send WebSocket message: {e}")
         
-        # Also print to console (existing behavior)
-        print(f"DEBUG: {message}")
+        # Log with appropriate level
+        if level == "ERROR":
+            logger.error(message)
+        elif level == "WARNING":
+            logger.warning(message)
+        elif level == "INFO":
+            logger.info(message)
+        else:
+            logger.debug(message)
         
+    def _ensure_directory_permissions(self, path: Path):
+        """Ensure directory has proper permissions for Linux deployment"""
+        try:
+            # Set directory permissions: owner=rwx, group=rx, others=rx
+            path.chmod(0o755)
+            # Ensure all parent directories have proper permissions
+            for parent in path.parents:
+                if parent.exists():
+                    parent.chmod(0o755)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Could not set directory permissions for {path}: {e}")
+    
+    def _ensure_file_permissions(self, file_path: Path):
+        """Ensure file has proper permissions for Linux deployment"""
+        try:
+            if file_path.exists():
+                # Set file permissions: owner=rw, group=r, others=r
+                file_path.chmod(0o644)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Could not set file permissions for {file_path}: {e}")
+    
+    def _safe_copy_file(self, src: Path, dst: Path):
+        """Safely copy file with proper error handling and permissions"""
+        try:
+            shutil.copy2(src, dst)
+            self._ensure_file_permissions(dst)
+            logger.debug(f"Copied file: {src} -> {dst}")
+        except (OSError, PermissionError, shutil.Error) as e:
+            logger.error(f"Failed to copy file {src} to {dst}: {e}")
+            raise
+    
+    def _safe_copy_tree(self, src: Path, dst: Path):
+        """Safely copy directory tree with proper error handling and permissions"""
+        try:
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+            # Ensure proper permissions on copied directory and contents
+            self._ensure_directory_permissions(dst)
+            for root, dirs, files in os.walk(dst):
+                root_path = Path(root)
+                for dir_name in dirs:
+                    self._ensure_directory_permissions(root_path / dir_name)
+                for file_name in files:
+                    self._ensure_file_permissions(root_path / file_name)
+            logger.debug(f"Copied directory tree: {src} -> {dst}")
+        except (OSError, PermissionError, shutil.Error) as e:
+            logger.error(f"Failed to copy directory {src} to {dst}: {e}")
+            raise
+    
+    async def _terminate_process_safely(self, process: subprocess.Popen, task_id: str, agent: str):
+        """Safely terminate process with proper cleanup for Linux"""
+        try:
+            # Try graceful termination first, then force kill
+            try:
+                # Send SIGTERM first
+                process.terminate()
+                await asyncio.sleep(2)  # Give it 2 seconds to terminate gracefully
+                
+                if process.poll() is None:  # Still running
+                    await self._send_debug(task_id, "Process didn't terminate gracefully, force killing...", "WARNING", agent)
+                    process.kill()
+                    await asyncio.sleep(1)  # Give it time to die
+                    
+                    # If it's still running, try killing the process group
+                    if process.poll() is None:
+                        try:
+                            os.killpg(os.getpgid(process.pid), 9)
+                        except (OSError, ProcessLookupError):
+                            pass  # Process might already be dead
+                            
+            except (OSError, ProcessLookupError):
+                # Process might already be dead
+                pass
+                
+            await self._send_debug(task_id, "Process terminated", "INFO", agent)
+            
+        except Exception as e:
+            await self._send_debug(task_id, f"Error terminating process: {e}", "ERROR", agent)
+    
     async def create_task(self, task_type: TaskType, configuration: TaskConfiguration, session_id: str) -> Task:
         """Create a new task with specified session ID"""
         task_id = str(uuid.uuid4())
         
         # Create app-specific directory structure first
-        import hashlib
         normalized_url = configuration.app_url.lower().strip().rstrip('/')
         app_hash = hashlib.sha1(normalized_url.encode()).hexdigest()[:APP_HASH_LENGTH]
         
@@ -80,8 +168,13 @@ class AgentService:
         
         self.tasks[task_id] = task
         
-        # Create session directory under app directory
-        session_path.mkdir(parents=True, exist_ok=True)
+        # Create session directory under app directory with proper permissions
+        try:
+            session_path.mkdir(parents=True, exist_ok=True)
+            self._ensure_directory_permissions(session_path)
+        except (OSError, PermissionError) as e:
+            logger.error(f"Failed to create session directory {session_path}: {e}")
+            raise
         
         return task
     
@@ -136,7 +229,6 @@ class AgentService:
             return success
             
         except Exception as e:
-            import traceback
             tb = traceback.format_exc()
             task.status = TaskStatus.failed
             task.error = f"Task execution exception: {str(e)} (Type: {type(e).__name__})\nTraceback: {tb}"
@@ -146,36 +238,31 @@ class AgentService:
     async def _create_opencode_config(self, task: Task):
         """Create session directory and copy essential OpenCode configuration"""
         try:
-            import shutil
-            from app.core.config import Settings
-            settings = Settings()
-            
             session_path = Path(task.session_path)
             
-            # Ensure session directory exists
+            # Ensure session directory exists with proper permissions
             session_path.mkdir(parents=True, exist_ok=True)
+            self._ensure_directory_permissions(session_path)
             
             # Copy opencode.json from config directory to session
             session_config_path = session_path / "opencode.json"
             
             if settings.opencode_config_path.exists():
-                shutil.copy2(settings.opencode_config_path, session_config_path)
-                print(f"DEBUG: Copied config to session: {session_config_path}")
+                self._safe_copy_file(settings.opencode_config_path, session_config_path)
+                logger.debug(f"Copied config to session: {session_config_path}")
             else:
-                print(f"WARNING: OpenCode config not found at {settings.opencode_config_path}")
+                logger.warning(f"OpenCode config not found at {settings.opencode_config_path}")
             
             # Copy .opencode directory from project root (standard OpenCode structure)
             project_opencode_dir = Path(".opencode")
             session_opencode_dir = session_path / ".opencode"
             
             if project_opencode_dir.exists():
-                # Copy the entire .opencode directory structure
-                if session_opencode_dir.exists():
-                    shutil.rmtree(session_opencode_dir)  # Remove if exists
-                shutil.copytree(project_opencode_dir, session_opencode_dir)
-                print(f"DEBUG: Copied .opencode directory to session: {session_opencode_dir}")
+                # Copy the entire .opencode directory structure with proper permissions
+                self._safe_copy_tree(project_opencode_dir, session_opencode_dir)
+                logger.debug(f"Copied .opencode directory to session: {session_opencode_dir}")
             else:
-                print(f"INFO: No .opencode directory found in project root - using OpenCode defaults")
+                logger.info("No .opencode directory found in project root - using OpenCode defaults")
             
         except Exception as e:
             raise Exception(f"Failed to create session configuration: {str(e)}")
@@ -219,7 +306,7 @@ class AgentService:
                     task.current_phase
                 )
             except Exception as e:
-                print(f"DEBUG: Failed to send status update via WebSocket: {e}")
+                logger.warning(f"Failed to send status update via WebSocket: {e}")
             
             # Create task-specific instructions using external prompt files
             app_url = task.configuration.app_url
@@ -261,15 +348,23 @@ class AgentService:
             ]
             await self._send_debug(task.id, f"Using {primary_agent} agent for {task.task_type} workflow", agent=primary_agent)
             
-            # Set up environment
+            # Set up environment with Linux optimizations
             env = os.environ.copy()
+            
+            # Set locale for proper Unicode handling
+            env.setdefault('LANG', 'C.UTF-8')
+            env.setdefault('LC_ALL', 'C.UTF-8')
+            # Ensure PATH includes common binary locations
+            path_dirs = env.get('PATH', '').split(os.pathsep)
+            common_paths = ['/usr/local/bin', '/usr/bin', '/bin']
+            for common_path in common_paths:
+                if common_path not in path_dirs:
+                    path_dirs.append(common_path)
+            env['PATH'] = os.pathsep.join(path_dirs)
             
             # Execute command from session directory where OpenCode project is located
             await self._send_debug(task.id, f"About to execute command: {' '.join(cmd_args)}", agent=primary_agent)
             await self._send_debug(task.id, f"Working directory: {session_path}", agent=primary_agent)
-            
-            # Use thread executor to run subprocess with real-time output capture
-            import concurrent.futures
             
             async def run_subprocess_with_streaming():
                 """Run subprocess with real-time output streaming"""
@@ -280,17 +375,24 @@ class AgentService:
                     loop = asyncio.get_event_loop()
                     
                     def create_process():
-                        return subprocess.Popen(
-                            cmd_args,
-                            cwd=session_path,  # Use session path as working directory
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            env=env,
-                            text=True,
-                            encoding='utf-8',
-                            errors='replace',
-                            bufsize=1,
-                        )
+                        try:
+                            return subprocess.Popen(
+                                cmd_args,
+                                cwd=session_path,  # Use session path as working directory
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                env=env,
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace',
+                                bufsize=1,
+                                # Linux optimizations
+                                preexec_fn=os.setsid,
+                                start_new_session=True
+                            )
+                        except (OSError, PermissionError) as e:
+                            logger.error(f"Failed to create subprocess: {e}")
+                            raise RuntimeError(f"Could not start OpenCode process: {e}")
                     
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         process = await loop.run_in_executor(executor, create_process)
@@ -322,8 +424,8 @@ class AgentService:
                         )
                         returncode = process.returncode
                     except asyncio.TimeoutError:
-                        await self._send_debug(task.id, "OpenCode process timed out after 15 minutes, killing...", "ERROR", agent=primary_agent)
-                        process.kill()
+                        await self._send_debug(task.id, "OpenCode process timed out, terminating...", "ERROR", agent=primary_agent)
+                        await self._terminate_process_safely(process, task.id, primary_agent)
                         returncode = -1
                     
                     # Give stream reading tasks time to finish before canceling
@@ -413,7 +515,7 @@ class AgentService:
             try:
                 await self.websocket_manager.send_completion(task.id, True)
             except Exception as e:
-                print(f"DEBUG: Failed to send completion via WebSocket: {e}")
+                logger.warning(f"Failed to send completion via WebSocket: {e}")
             
             await self._send_debug(task.id, "All agents completed successfully")
             return True, "All agents completed successfully"
@@ -435,18 +537,26 @@ class AgentService:
             return []
         
         files = []
-        for file_path in session_path.rglob("*"):
-            if file_path.is_file():
-                stat = file_path.stat()
-                relative_path = file_path.relative_to(session_path)
-                
-                files.append(SessionFile(
-                    name=file_path.name,
-                    path=str(relative_path),
-                    size=stat.st_size,
-                    modified=datetime.fromtimestamp(stat.st_mtime),
-                    type="file"
-                ))
+        try:
+            for file_path in session_path.rglob("*"):
+                try:
+                    if file_path.is_file():
+                        stat = file_path.stat()
+                        relative_path = file_path.relative_to(session_path)
+                        
+                        files.append(SessionFile(
+                            name=file_path.name,
+                            path=str(relative_path),
+                            size=stat.st_size,
+                            modified=datetime.fromtimestamp(stat.st_mtime),
+                            type="file"
+                        ))
+                except (OSError, PermissionError) as e:
+                    # Skip files we can't access (common on Linux with permission restrictions)
+                    logger.debug(f"Skipping file due to access error: {file_path} - {e}")
+                    continue
+        except (OSError, PermissionError) as e:
+            logger.error(f"Error listing session files in {session_path}: {e}")
         
         return files
 

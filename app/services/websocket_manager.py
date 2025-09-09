@@ -1,9 +1,12 @@
 import asyncio
 import json
+import logging
 from datetime import datetime
 from typing import Dict, List, Set
 from fastapi import WebSocket
 from app.models import DebugMessage, StreamEvent
+
+logger = logging.getLogger(__name__)
 
 
 class WebSocketManager:
@@ -25,7 +28,7 @@ class WebSocketManager:
         self.connections[task_id].append(websocket)
         self.active_connections.add(websocket)
         
-        print(f"DEBUG: WebSocket connected for task {task_id}. Total connections: {len(self.active_connections)}")
+        logger.debug(f"WebSocket connected for task {task_id}. Total connections: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket, task_id: str):
         """Remove a WebSocket connection"""
@@ -38,7 +41,7 @@ class WebSocketManager:
                 del self.connections[task_id]
         
         self.active_connections.discard(websocket)
-        print(f"DEBUG: WebSocket disconnected for task {task_id}. Total connections: {len(self.active_connections)}")
+        logger.debug(f"WebSocket disconnected for task {task_id}. Total connections: {len(self.active_connections)}")
     
     async def send_debug_message(self, task_id: str, level: str, message: str, agent: str = None):
         """Send a debug message to all clients connected to a specific task"""

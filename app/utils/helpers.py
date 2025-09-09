@@ -1,17 +1,5 @@
-import logging
 from datetime import datetime
 from pathlib import Path
-
-def setup_logging(log_level: str = "INFO"):
-    """Setup application logging"""
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("app.log")
-        ]
-    )
 
 def ensure_directory_exists(path: Path):
     """Ensure directory exists, create if not"""

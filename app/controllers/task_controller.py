@@ -20,6 +20,27 @@ from app.core.config import settings
 
 router = APIRouter(tags=["tasks"])
 
+# Constants
+EXCLUDED_DIRS = {'node_modules', '.git', '__pycache__', '.vscode', '.idea'}
+TEXT_FILE_ENCODING = 'utf-8'
+
+def find_session_path(session_id: str) -> Optional[Path]:
+    """Find session path across all app directories"""
+    session_root = settings.session_root
+    
+    # Search for session across all app directories
+    for app_dir in session_root.glob("app-*"):
+        if app_dir.is_dir():
+            potential_path = app_dir / session_id
+            if potential_path.exists() and potential_path.is_dir():
+                return potential_path
+    
+    return None
+
+def should_exclude_path(file_path: Path) -> bool:
+    """Check if path should be excluded from processing"""
+    return any(excluded in file_path.parts for excluded in EXCLUDED_DIRS)
+
 @router.post("/tasks", response_model=Task, status_code=201)
 async def create_task(
     task_request: TaskRequest
@@ -116,7 +137,10 @@ async def stream_task_logs(websocket: WebSocket, task_id: str):
             except WebSocketDisconnect:
                 break
             except Exception as e:
-                print(f"DEBUG: WebSocket error for task {task_id}: {e}")
+                # Log WebSocket errors but don't expose internal details
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"WebSocket error for task {task_id}: {e}")
                 break
                 
     except WebSocketDisconnect:
@@ -147,9 +171,7 @@ async def cancel_task(task_id: str) -> Task:
 @router.get("/sessions", response_model=List[str])
 async def get_sessions() -> List[str]:
     """Get list of all available sessions"""
-    from app.core.config import settings
-    
-    sessions = []
+    sessions = set()
     session_root = settings.session_root
     
     # Search for sessions across all app directories
@@ -158,66 +180,41 @@ async def get_sessions() -> List[str]:
             # Each subdirectory in app-* is a session
             for session_dir in app_dir.iterdir():
                 if session_dir.is_dir():
-                    sessions.append(session_dir.name)
+                    sessions.add(session_dir.name)
     
-    return sorted(list(set(sessions)))  # Remove duplicates and sort
+    return sorted(list(sessions))
 
 @router.get("/sessions/{session_id}/files", response_model=List[SessionFile])
 async def get_session_files_by_session_id(session_id: str) -> List[SessionFile]:
     """Get files in session by session ID"""
-    from app.core.config import settings
-    
-    # Find session path using session directory structure
-    session_root = settings.session_root
-    session_path = None
-    
-    # Search for session across all app directories
-    for app_dir in session_root.glob("app-*"):
-        potential_path = app_dir / session_id
-        if potential_path.exists():
-            session_path = potential_path
-            break
-    
+    session_path = find_session_path(session_id)
     if not session_path:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Reuse the existing file listing logic
     files = []
     for file_path in session_path.rglob("*"):
-        if file_path.is_file():
-            # Skip node_modules to match ZIP download behavior
-            if 'node_modules' in file_path.parts:
-                continue
+        if file_path.is_file() and not should_exclude_path(file_path):
+            try:
+                stat = file_path.stat()
+                relative_path = file_path.relative_to(session_path)
                 
-            stat = file_path.stat()
-            relative_path = file_path.relative_to(session_path)
-            
-            files.append(SessionFile(
-                name=file_path.name,
-                path=str(relative_path),
-                size=stat.st_size,
-                modified=datetime.fromtimestamp(stat.st_mtime),
-                type="file"
-            ))
+                files.append(SessionFile(
+                    name=file_path.name,
+                    path=str(relative_path),
+                    size=stat.st_size,
+                    modified=datetime.fromtimestamp(stat.st_mtime),
+                    type="file"
+                ))
+            except (OSError, PermissionError):
+                # Skip files we can't access
+                continue
     
     return files
 
 @router.get("/sessions/{session_id}/files/{file_path:path}")
 async def download_session_file_by_session_id(session_id: str, file_path: str):
     """Download a specific file from session by session ID"""
-    from app.core.config import settings
-    
-    # Find session path
-    session_root = settings.session_root
-    session_path = None
-    
-    # Search for session across all app directories
-    for app_dir in session_root.glob("app-*"):
-        potential_path = app_dir / session_id
-        if potential_path.exists():
-            session_path = potential_path
-            break
-    
+    session_path = find_session_path(session_id)
     if not session_path:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -230,7 +227,7 @@ async def download_session_file_by_session_id(session_id: str, file_path: str):
     except ValueError:
         raise HTTPException(status_code=403, detail="Access denied: file outside session directory")
     
-    # Check if file exists
+    # Check if file exists and is accessible
     if not full_file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     
@@ -243,10 +240,10 @@ async def download_session_file_by_session_id(session_id: str, file_path: str):
     # For text files, return as plain text to display in browser
     if content_type and content_type.startswith('text/'):
         try:
-            with open(full_file_path, 'r', encoding='utf-8') as f:
+            with open(full_file_path, 'r', encoding=TEXT_FILE_ENCODING) as f:
                 content = f.read()
             return PlainTextResponse(content=content, media_type=content_type)
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, PermissionError):
             # Fall back to file download if can't read as text
             pass
     
@@ -260,26 +257,9 @@ async def download_session_file_by_session_id(session_id: str, file_path: str):
 @router.get("/sessions/{session_id}/download")
 async def download_session_zip_by_session_id(session_id: str):
     """Download complete session folder as ZIP file by session ID"""
-    import zipfile
-    import tempfile
-    from app.core.config import settings
-    
-    # Find session path
-    session_root = settings.session_root
-    session_path = None
-    
-    # Search for session across all app directories
-    for app_dir in session_root.glob("app-*"):
-        potential_path = app_dir / session_id
-        if potential_path.exists():
-            session_path = potential_path
-            break
-    
+    session_path = find_session_path(session_id)
     if not session_path:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    if not session_path.exists():
-        raise HTTPException(status_code=404, detail="Session directory not found")
     
     # Create temporary ZIP file
     temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
@@ -290,14 +270,14 @@ async def download_session_zip_by_session_id(session_id: str):
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # Add all files from session directory
             for file_path in session_path.rglob("*"):
-                if file_path.is_file():
-                    # Skip node_modules to reduce file size
-                    if 'node_modules' in file_path.parts:
+                if file_path.is_file() and not should_exclude_path(file_path):
+                    try:
+                        # Get relative path from session root
+                        relative_path = file_path.relative_to(session_path)
+                        zipf.write(file_path, relative_path)
+                    except (OSError, PermissionError):
+                        # Skip files we can't access
                         continue
-                    
-                    # Get relative path from session root
-                    relative_path = file_path.relative_to(session_path)
-                    zipf.write(file_path, relative_path)
         
         # Generate filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -334,5 +314,6 @@ async def get_configuration():
         "session_root": str(settings.session_root),
         "environment": "production" if not settings.debug else "development",
         "available_task_types": ["complete", "plan", "generate", "run", "fix"],
-        "description": "Hardcoded GitHub Copilot configuration for deployment"
+        "platform": os.name,  # 'posix' for Linux/Unix, 'nt' for Windows
+        "description": "Agent Runtime API with GitHub Copilot integration"
     }

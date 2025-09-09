@@ -10,27 +10,29 @@ and middleware configuration.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import logging
 
 from app.core.config import settings
 from app.controllers.task_controller import router as task_router
 from app.controllers.auth_controller import router as auth_router
-from app.utils.helpers import setup_logging, ensure_directory_exists
+from app.utils.helpers import ensure_directory_exists
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown"""
     # Startup
-    setup_logging()
     ensure_directory_exists(settings.session_root)
-    print(f"Agent Runtime API started. Sessions: {settings.session_root}")
-    print(f"OpenCode command: {settings.opencode_command}")
-    print(f"OpenCode available: {settings.opencode_available}")
+    logger.info(f"Agent Runtime API started. Sessions: {settings.session_root}")
+    logger.info(f"OpenCode command: {settings.opencode_command}")
+    logger.info(f"OpenCode available: {settings.opencode_available}")
     
     yield
     
     # Shutdown
-    print("Agent Runtime API shutting down...")
+    logger.info("Agent Runtime API shutting down")
 
 
 # Create FastAPI application
