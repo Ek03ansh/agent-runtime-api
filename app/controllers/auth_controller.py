@@ -14,13 +14,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
-# Constants
-INITIAL_WAIT_SECONDS = 4.0  # Wait before typing
-CHAR_DELAY_SECONDS = 0.1    # Delay between characters
-ENTER_DELAY_SECONDS = 1.0   # Wait before pressing Enter
-AUTH_TIMEOUT_SECONDS = 25   # Timeout for device code extraction
-BACKGROUND_TIMEOUT_MINUTES = 10  # Background monitoring timeout
-GITHUB_DEVICE_URL = "https://github.com/login/device"  # Always the same URL
+# Authentication timing constants
+AUTH_TIMING = {
+    'initial_wait': 4.0,       # Wait before typing
+    'char_delay': 0.1,         # Delay between characters  
+    'enter_delay': 1.0,        # Wait before pressing Enter
+    'auth_timeout': 25,        # Device code extraction timeout
+    'monitor_timeout': 600     # Background monitoring timeout (10 min)
+}
+
+GITHUB_DEVICE_URL = "https://github.com/login/device"
 
 def clean_ansi_codes(text: str) -> str:
     """Remove ANSI escape codes from text to make it readable"""
@@ -34,7 +37,7 @@ async def _monitor_auth_background(process, master_fd):
     """Monitor auth process in background after device code is returned"""
     try:
         start_time = asyncio.get_event_loop().time()
-        max_wait_seconds = BACKGROUND_TIMEOUT_MINUTES * 60
+        max_wait_seconds = AUTH_TIMING['monitor_timeout']
         
         while (asyncio.get_event_loop().time() - start_time) < max_wait_seconds:
             try:
@@ -115,11 +118,11 @@ async def auth_login():
         logger.info(f"Auth process started with PID: {_auth_process.pid}")
         
         # Wait and type "GitHub Copilot" (exact working sequence)
-        await asyncio.sleep(INITIAL_WAIT_SECONDS)
+        await asyncio.sleep(AUTH_TIMING['initial_wait'])
         for char in 'GitHub Copilot':
             os.write(master_fd, char.encode())
-            await asyncio.sleep(CHAR_DELAY_SECONDS)
-        await asyncio.sleep(ENTER_DELAY_SECONDS)
+            await asyncio.sleep(AUTH_TIMING['char_delay'])
+        await asyncio.sleep(AUTH_TIMING['enter_delay'])
         os.write(master_fd, b'\r')
         
         # Monitor for device code and URL
@@ -127,7 +130,7 @@ async def auth_login():
         verification_url = None
         start_time = asyncio.get_event_loop().time()
         
-        while (asyncio.get_event_loop().time() - start_time) < AUTH_TIMEOUT_SECONDS:
+        while (asyncio.get_event_loop().time() - start_time) < AUTH_TIMING['auth_timeout']:
             try:
                 ready, _, _ = select.select([master_fd], [], [], 0.1)
                 

@@ -43,11 +43,24 @@ class WebSocketManager:
         self.active_connections.discard(websocket)
         logger.debug(f"WebSocket disconnected for task {task_id}. Total connections: {len(self.active_connections)}")
     
-    async def send_debug_message(self, task_id: str, level: str, message: str, agent: str = None):
-        """Send a debug message to all clients connected to a specific task"""
+    async def _send_to_clients(self, task_id: str, message: str):
+        """Send message to all clients for a task, handling disconnections"""
         if task_id not in self.connections:
             return
         
+        disconnected = []
+        for websocket in self.connections[task_id]:
+            try:
+                await websocket.send_text(message)
+            except Exception:
+                disconnected.append(websocket)
+        
+        # Clean up disconnected clients
+        for ws in disconnected:
+            self.disconnect(ws, task_id)
+
+    async def send_debug_message(self, task_id: str, level: str, message: str, agent: str = None):
+        """Send a debug message to all clients connected to a specific task"""
         debug_msg = DebugMessage(
             timestamp=datetime.now(),
             level=level,
@@ -61,23 +74,10 @@ class WebSocketManager:
             data=debug_msg.dict()
         )
         
-        # Send to all connected clients for this task
-        disconnected = []
-        for websocket in self.connections[task_id]:
-            try:
-                await websocket.send_text(json.dumps(event.dict(), default=str))
-            except Exception:
-                disconnected.append(websocket)
-        
-        # Clean up disconnected clients
-        for ws in disconnected:
-            self.disconnect(ws, task_id)
+        await self._send_to_clients(task_id, json.dumps(event.dict(), default=str))
     
     async def send_status_update(self, task_id: str, status: str, phase: str = None):
         """Send a status update to all clients connected to a specific task"""
-        if task_id not in self.connections:
-            return
-        
         event = StreamEvent(
             event_type="status",
             data={
@@ -88,22 +88,10 @@ class WebSocketManager:
             }
         )
         
-        disconnected = []
-        for websocket in self.connections[task_id]:
-            try:
-                await websocket.send_text(json.dumps(event.dict(), default=str))
-            except Exception:
-                disconnected.append(websocket)
-        
-        # Clean up disconnected clients
-        for ws in disconnected:
-            self.disconnect(ws, task_id)
+        await self._send_to_clients(task_id, json.dumps(event.dict(), default=str))
     
     async def send_completion(self, task_id: str, success: bool, error: str = None):
         """Send task completion notification"""
-        if task_id not in self.connections:
-            return
-        
         event = StreamEvent(
             event_type="complete",
             data={
@@ -114,16 +102,7 @@ class WebSocketManager:
             }
         )
         
-        disconnected = []
-        for websocket in self.connections[task_id]:
-            try:
-                await websocket.send_text(json.dumps(event.dict(), default=str))
-            except Exception:
-                disconnected.append(websocket)
-        
-        # Clean up disconnected clients
-        for ws in disconnected:
-            self.disconnect(ws, task_id)
+        await self._send_to_clients(task_id, json.dumps(event.dict(), default=str))
     
     def get_connection_count(self, task_id: str = None) -> int:
         """Get number of active connections for a task or total"""

@@ -1,24 +1,27 @@
+import asyncio
+import json
+import logging
+import mimetypes
+import os
+import tempfile
+import zipfile
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
-from typing import List, Optional
-from datetime import datetime
-import asyncio
-from pathlib import Path
-import mimetypes
-import zipfile
-import tempfile
-import os
-import json
 
+from app.core.config import settings
 from app.models import (
-    Task, TaskRequest, TaskListResponse, TaskLogsResponse, HealthResponse,
-    SessionFile, TaskStatus
+    HealthResponse, SessionFile, Task, TaskListResponse, TaskLogsResponse, 
+    TaskRequest, TaskStatus
 )
 from app.services.agent_service import agent_service
 from app.services.websocket_manager import websocket_manager
-from app.core.config import settings
 
 router = APIRouter(tags=["tasks"])
+logger = logging.getLogger(__name__)
 
 # Constants
 EXCLUDED_DIRS = {'node_modules', '.git', '__pycache__', '.vscode', '.idea'}
@@ -138,8 +141,6 @@ async def stream_task_logs(websocket: WebSocket, task_id: str):
                 break
             except Exception as e:
                 # Log WebSocket errors but don't expose internal details
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.error(f"WebSocket error for task {task_id}: {e}")
                 break
                 
@@ -167,7 +168,7 @@ async def cancel_task(task_id: str) -> Task:
     task = await agent_service.get_task(task_id)
     return task
 
-# Session-based endpoints
+# Session management endpoints
 @router.get("/sessions", response_model=List[str])
 async def get_sessions() -> List[str]:
     """Get list of all available sessions"""
@@ -185,12 +186,19 @@ async def get_sessions() -> List[str]:
     return sorted(list(sessions))
 
 @router.get("/sessions/{session_id}/files", response_model=List[SessionFile])
-async def get_session_files_by_session_id(session_id: str) -> List[SessionFile]:
-    """Get files in session by session ID"""
+async def get_session_files(session_id: str) -> List[SessionFile]:
+    """Get files in session by session ID - delegates to agent service"""
+    # Use existing agent_service method to avoid duplication
     session_path = find_session_path(session_id)
     if not session_path:
         raise HTTPException(status_code=404, detail="Session not found")
     
+    # Find a task with this session path to reuse agent_service logic
+    for task in (await agent_service.get_all_tasks()):
+        if Path(task.session_path).name == session_id:
+            return await agent_service.get_session_files(task.id)
+    
+    # Fallback to manual file listing if no task found
     files = []
     for file_path in session_path.rglob("*"):
         if file_path.is_file() and not should_exclude_path(file_path):
@@ -206,19 +214,17 @@ async def get_session_files_by_session_id(session_id: str) -> List[SessionFile]:
                     type="file"
                 ))
             except (OSError, PermissionError):
-                # Skip files we can't access
                 continue
     
     return files
 
 @router.get("/sessions/{session_id}/files/{file_path:path}")
-async def download_session_file_by_session_id(session_id: str, file_path: str):
-    """Download a specific file from session by session ID"""
+async def download_session_file(session_id: str, file_path: str):
+    """Download a specific file from session"""
     session_path = find_session_path(session_id)
     if not session_path:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Construct full file path
     full_file_path = session_path / file_path
     
     # Security check: ensure file is within session directory
@@ -227,12 +233,8 @@ async def download_session_file_by_session_id(session_id: str, file_path: str):
     except ValueError:
         raise HTTPException(status_code=403, detail="Access denied: file outside session directory")
     
-    # Check if file exists and is accessible
-    if not full_file_path.exists():
+    if not full_file_path.exists() or not full_file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    
-    if not full_file_path.is_file():
-        raise HTTPException(status_code=400, detail="Path is not a file")
     
     # Determine content type
     content_type, _ = mimetypes.guess_type(str(full_file_path))
@@ -244,10 +246,8 @@ async def download_session_file_by_session_id(session_id: str, file_path: str):
                 content = f.read()
             return PlainTextResponse(content=content, media_type=content_type)
         except (UnicodeDecodeError, PermissionError):
-            # Fall back to file download if can't read as text
-            pass
+            pass  # Fall back to file download
     
-    # For other files or if text reading failed, return as file download
     return FileResponse(
         path=str(full_file_path),
         filename=full_file_path.name,
@@ -255,8 +255,8 @@ async def download_session_file_by_session_id(session_id: str, file_path: str):
     )
 
 @router.get("/sessions/{session_id}/download")
-async def download_session_zip_by_session_id(session_id: str):
-    """Download complete session folder as ZIP file by session ID"""
+async def download_session_zip(session_id: str):
+    """Download complete session folder as ZIP file"""
     session_path = find_session_path(session_id)
     if not session_path:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -268,15 +268,12 @@ async def download_session_zip_by_session_id(session_id: str):
     
     try:
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Add all files from session directory
             for file_path in session_path.rglob("*"):
                 if file_path.is_file() and not should_exclude_path(file_path):
                     try:
-                        # Get relative path from session root
                         relative_path = file_path.relative_to(session_path)
                         zipf.write(file_path, relative_path)
                     except (OSError, PermissionError):
-                        # Skip files we can't access
                         continue
         
         # Generate filename with timestamp
@@ -290,7 +287,6 @@ async def download_session_zip_by_session_id(session_id: str):
         )
         
     except Exception as e:
-        # Clean up temp file on error
         Path(zip_path).unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Failed to create ZIP: {str(e)}")
 

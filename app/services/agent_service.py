@@ -63,6 +63,11 @@ class AgentService:
         else:
             logger.debug(message)
         
+    def _handle_file_operation_error(self, operation: str, path: Path, error: Exception):
+        """Centralized error handling for file operations"""
+        logger.error(f"Failed to {operation} {path}: {error}")
+        raise
+    
     def _ensure_directory_permissions(self, path: Path):
         """Ensure directory has proper permissions for Linux deployment"""
         try:
@@ -84,6 +89,18 @@ class AgentService:
         except (OSError, PermissionError) as e:
             logger.warning(f"Could not set file permissions for {file_path}: {e}")
     
+    def _apply_permissions_recursively(self, path: Path):
+        """Apply proper permissions recursively to a directory tree"""
+        try:
+            if path.is_dir():
+                path.chmod(0o755)
+                for item in path.iterdir():
+                    self._apply_permissions_recursively(item)
+            elif path.is_file():
+                path.chmod(0o644)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Could not set permissions for {path}: {e}")
+
     def _safe_copy_file(self, src: Path, dst: Path):
         """Safely copy file with proper error handling and permissions"""
         try:
@@ -91,8 +108,7 @@ class AgentService:
             self._ensure_file_permissions(dst)
             logger.debug(f"Copied file: {src} -> {dst}")
         except (OSError, PermissionError, shutil.Error) as e:
-            logger.error(f"Failed to copy file {src} to {dst}: {e}")
-            raise
+            self._handle_file_operation_error("copy file", f"{src} to {dst}", e)
     
     def _safe_copy_tree(self, src: Path, dst: Path):
         """Safely copy directory tree with proper error handling and permissions"""
@@ -100,18 +116,11 @@ class AgentService:
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src, dst)
-            # Ensure proper permissions on copied directory and contents
-            self._ensure_directory_permissions(dst)
-            for root, dirs, files in os.walk(dst):
-                root_path = Path(root)
-                for dir_name in dirs:
-                    self._ensure_directory_permissions(root_path / dir_name)
-                for file_name in files:
-                    self._ensure_file_permissions(root_path / file_name)
+            # Apply permissions recursively in one pass
+            self._apply_permissions_recursively(dst)
             logger.debug(f"Copied directory tree: {src} -> {dst}")
         except (OSError, PermissionError, shutil.Error) as e:
-            logger.error(f"Failed to copy directory {src} to {dst}: {e}")
-            raise
+            self._handle_file_operation_error("copy directory", f"{src} to {dst}", e)
     
     async def _terminate_process_safely(self, process: subprocess.Popen, task_id: str, agent: str):
         """Safely terminate process with proper cleanup for Linux"""
@@ -173,8 +182,7 @@ class AgentService:
             session_path.mkdir(parents=True, exist_ok=True)
             self._ensure_directory_permissions(session_path)
         except (OSError, PermissionError) as e:
-            logger.error(f"Failed to create session directory {session_path}: {e}")
-            raise
+            self._handle_file_operation_error("create session directory", session_path, e)
         
         return task
     
