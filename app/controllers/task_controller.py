@@ -310,6 +310,6 @@ async def get_configuration():
         "session_root": str(settings.session_root),
         "environment": "production" if not settings.debug else "development",
         "available_task_types": ["complete", "plan", "generate", "run", "fix"],
-        "platform": os.name,  # 'posix' for Linux/Unix, 'nt' for Windows
+        "platform": "linux",  # Linux-only deployment
         "description": "Agent Runtime API with GitHub Copilot integration"
     }

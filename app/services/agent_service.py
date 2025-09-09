@@ -357,19 +357,18 @@ class AgentService:
             ]
             await self._send_debug(task.id, f"Using {primary_agent} agent for {task.task_type} workflow", agent=primary_agent)
             
-            # Set up environment with Linux optimizations
+            # Set up environment for Linux deployment
             env = os.environ.copy()
             
-            # Set locale for proper Unicode handling
-            env.setdefault('LANG', 'C.UTF-8')
-            env.setdefault('LC_ALL', 'C.UTF-8')
-            # Ensure PATH includes common binary locations
-            path_dirs = env.get('PATH', '').split(os.pathsep)
-            common_paths = ['/usr/local/bin', '/usr/bin', '/bin']
-            for common_path in common_paths:
-                if common_path not in path_dirs:
-                    path_dirs.append(common_path)
-            env['PATH'] = os.pathsep.join(path_dirs)
+            # Ensure PATH includes standard Linux binary locations
+            current_path = env.get('PATH', '')
+            linux_paths = ['/usr/local/bin', '/usr/bin', '/bin']
+            
+            # Add missing paths (simple string manipulation for Linux)
+            for linux_path in linux_paths:
+                if linux_path not in current_path:
+                    current_path = f"{linux_path}:{current_path}"
+            env['PATH'] = current_path
             
             # Execute command from session directory where OpenCode project is located
             await self._send_debug(task.id, f"About to execute command: {' '.join(cmd_args)}", agent=primary_agent)

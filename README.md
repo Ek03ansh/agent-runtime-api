@@ -48,21 +48,21 @@ Before running the Agent Runtime API, you need to install OpenCode:
 Choose one of the following methods:
 
 ```bash
-# Option 1: Using npm setup script (recommended)
+# Recommended: Using npm setup script
 npm run setup
 
-# Option 2: Manual installation with npm
+# Manual installation with npm
 npm install -g opencode-ai
 
-# Option 3: Other package managers
+# Other package managers  
 npm run setup:bun    # Uses bun
 npm run setup:pnpm   # Uses pnpm  
 npm run setup:yarn   # Uses yarn
 
-# Option 4: Homebrew (macOS/Linux)
+# Homebrew (Linux)
 brew install sst/tap/opencode
 
-# Option 5: Install script
+# Install script
 curl -fsSL https://opencode.ai/install | bash
 ```
 
@@ -115,13 +115,10 @@ python test_agent_api.py create complete
 
 ### Option 2: Docker Deployment
 
-#### Quick Deployment
+#### Quick Deployment (Linux)
 ```bash
-# Linux/macOS
+# Deploy script
 ./deploy.sh
-
-# Windows PowerShell
-./deploy.ps1
 
 # Manual Docker commands
 docker build -t agent-runtime-api .

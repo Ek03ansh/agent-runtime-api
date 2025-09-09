@@ -7,16 +7,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-def find_opencode_command():
-    """Find the correct OpenCode command for Linux deployment"""
-    # Use standard npm global installation path for Linux
-    return "opencode"
-
 # Environment-based configuration
 class Settings:
     def __init__(self):
         self.session_root = Path(os.getenv("SESSION_ROOT", "./sessions"))
-        self.opencode_command = os.getenv("OPENCODE_COMMAND") or find_opencode_command()
+        self.opencode_command = os.getenv("OPENCODE_COMMAND", "opencode")
         self.opencode_config_path = Path(os.getenv("OPENCODE_CONFIG_PATH", "./opencode.json"))
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "5001"))
