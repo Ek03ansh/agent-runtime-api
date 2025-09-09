@@ -348,10 +348,11 @@ class AgentService:
             # Use build agent for all task types with appropriate instructions
             cmd_args = [
                 settings.opencode_command, 
-                "run", 
-                "-m", model_identifier,
+                "run",
+                "--print-logs",
+                "--log-level", settings.opencode_log_level,  # Use configurable log level from environment
                 "--agent", primary_agent,
-                "--log-level", "DEBUG",
+                "-m", model_identifier,
                 instructions
             ]
             await self._send_debug(task.id, f"Using {primary_agent} agent for {task.task_type} workflow", agent=primary_agent)

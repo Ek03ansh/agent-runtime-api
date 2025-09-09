@@ -22,6 +22,7 @@ class Settings:
         self.port = int(os.getenv("PORT", "5001"))
         self.debug = os.getenv("DEBUG", "false").lower() == "true"
         self.log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        self.opencode_log_level = os.getenv("OPENCODE_LOG_LEVEL", "WARN").upper()
         self.cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
         
         # Production-ready configuration

@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "setup": "npm install -g opencode-ai && npm install && npx playwright install chromium && npx playwright install-deps",
-    "setup-wsl": "npm install && npx playwright install chromium && npx playwright install-deps",
+    "setup-wsl": "sudo npm install -g opencode-ai && npm install && npx playwright install chromium && npx playwright install-deps",
     "setup-complete": "npm run setup && wsl sudo npx playwright install-deps",
     "install-browsers": "npx playwright install chromium",
     "install-deps": "npx playwright install-deps",
