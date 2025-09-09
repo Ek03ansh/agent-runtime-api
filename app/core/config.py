@@ -45,6 +45,9 @@ class Settings:
             ]
         )
         
+        # Reduce noise from watchfiles during development
+        logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
+        
     @property
     def opencode_available(self) -> bool:
         """Check if OpenCode command is available"""

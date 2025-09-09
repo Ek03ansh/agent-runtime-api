@@ -386,7 +386,7 @@ class AgentService:
                         try:
                             return subprocess.Popen(
                                 cmd_args,
-                                cwd=session_path,  # Use session path as working directory
+                                cwd=session_path,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 env=env,
@@ -394,8 +394,6 @@ class AgentService:
                                 encoding='utf-8',
                                 errors='replace',
                                 bufsize=1,
-                                # Linux optimizations
-                                preexec_fn=os.setsid,
                                 start_new_session=True
                             )
                         except (OSError, PermissionError) as e:

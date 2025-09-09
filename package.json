@@ -3,23 +3,30 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "setup": "npm install -g opencode-ai && npm install",
-    "setup:bun": "bun install -g opencode-ai && npm install",
-    "setup:pnpm": "pnpm install -g opencode-ai && npm install",
-    "setup:yarn": "yarn global add opencode-ai && npm install",
+    "setup": "npm install -g opencode-ai && npm install && npx playwright install chromium",
+    "install-browsers": "npx playwright install chromium",
     "verify": "opencode --version",
     "check": "python setup_check.py",
     "dev": "python main.py",
     "test": "python test_agent_api.py test",
     "test:create": "python test_agent_api.py create complete"
   },
-  "keywords": ["opencode", "playwright", "testing", "automation", "api"],
+  "keywords": [
+    "opencode",
+    "playwright",
+    "testing",
+    "automation",
+    "api"
+  ],
   "author": "",
   "license": "ISC",
   "description": "Agent Runtime API for OpenCode with Playwright MCP integration",
   "devDependencies": {
-    "@playwright/test": "1.56.0-alpha-2025-09-02",
     "@playwright/mcp": "next",
+    "@playwright/test": "1.56.0-alpha-2025-09-02",
     "@types/node": "^24.3.0"
+  },
+  "dependencies": {
+    "setup": "^0.0.3"
   }
 }

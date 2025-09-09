@@ -72,9 +72,18 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
+    import logging
+    
+    # Logging is already configured in config.py using LOG_LEVEL from .env
+    # Just suppress noisy loggers
+    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+    
     uvicorn.run(
         "main:app", 
         host=settings.host, 
         port=settings.port,
-        reload=settings.debug
+        reload=settings.debug,
+        reload_excludes=["sessions/**"] if settings.debug else None,
+        log_level="debug" if settings.debug else "info"
     )

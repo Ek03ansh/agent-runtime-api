@@ -185,7 +185,7 @@ def create_task(task_type='complete', session_id=None, app_url=None):
         'session_id': session_id,
         'configuration': {
             'app_url': app_url,
-            'instructions': 'Generate comprehensive test coverage'
+            'instructions': ''
         }
     }
     
