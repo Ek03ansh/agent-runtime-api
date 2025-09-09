@@ -2,10 +2,25 @@ from fastapi import APIRouter, HTTPException
 import subprocess
 import asyncio
 import re
+import logging
+import pty
+import os
+import select
 from app.core.config import settings
 from app.models import AuthLoginResponse, AuthStatusResponse
 
+# Set up logger for auth controller
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["auth"])
+
+# Constants
+INITIAL_WAIT_SECONDS = 4.0  # Wait before typing
+CHAR_DELAY_SECONDS = 0.1    # Delay between characters
+ENTER_DELAY_SECONDS = 1.0   # Wait before pressing Enter
+AUTH_TIMEOUT_SECONDS = 25   # Timeout for device code extraction
+BACKGROUND_TIMEOUT_MINUTES = 10  # Background monitoring timeout
+GITHUB_DEVICE_URL = "https://github.com/login/device"  # Always the same URL
 
 def clean_ansi_codes(text: str) -> str:
     """Remove ANSI escape codes from text to make it readable"""
@@ -14,126 +29,171 @@ def clean_ansi_codes(text: str) -> str:
 
 # Store ongoing auth process
 _auth_process = None
-_auth_output = {"stdout": "", "stderr": "", "device_code": None, "verification_url": None}
 
-async def _monitor_auth_process(process):
-    """Monitor auth process and extract device code info"""
-    global _auth_output
-    
+async def _monitor_auth_background(process, master_fd):
+    """Monitor auth process in background after device code is returned"""
     try:
-        # Read output line by line to capture device code
-        while True:
-            line = await asyncio.get_event_loop().run_in_executor(
-                None, process.stdout.readline
-            )
-            if not line:
+        start_time = asyncio.get_event_loop().time()
+        max_wait_seconds = BACKGROUND_TIMEOUT_MINUTES * 60
+        
+        while (asyncio.get_event_loop().time() - start_time) < max_wait_seconds:
+            try:
+                ready, _, _ = select.select([master_fd], [], [], 1.0)  # 1 second timeout
+                
+                if ready:
+                    data = os.read(master_fd, 1024).decode('utf-8', errors='replace')
+                    if data:
+                        clean_line = clean_ansi_codes(data).strip()
+                        # Log only "Done" completion (specific message we know)
+                        if "Done" in clean_line:
+                            logger.info(f"🏁 AUTH COMPLETED: {clean_line}")
+                            break
+                            
+            except (OSError, ValueError):
+                # Process ended or PTY closed
                 break
                 
-            line = line.strip()
-            if line:
-                # Store raw output for processing but clean for display
-                _auth_output["stdout"] += line + "\n"
-                clean_line = clean_ansi_codes(line)
-                
-                # Better device code extraction using regex on clean text
-                if not _auth_output["device_code"]:
-                    # Look for patterns like "Enter code: XXXX-XXXX" or "code: XXXX-XXXX"
-                    code_match = re.search(r'(?:Enter code|code):\s*([A-Z0-9]{4}-[A-Z0-9]{4})', clean_line, re.IGNORECASE)
-                    if code_match:
-                        _auth_output["device_code"] = code_match.group(1)
-                
-                # Extract GitHub device URL
-                if "https://github.com/login/device" in clean_line:
-                    _auth_output["verification_url"] = "https://github.com/login/device"
+            await asyncio.sleep(1.0)
         
-        # Wait for process completion
-        returncode = await asyncio.get_event_loop().run_in_executor(
-            None, process.wait
-        )
-        
+        # Cleanup
+        try:
+            os.close(master_fd)
+            process.wait()
+        except:
+            pass
+            
     except Exception as e:
-        _auth_output["stderr"] += f"Monitoring error: {str(e)}\n"
+        logger.error(f"Background monitoring error: {e}")
+        try:
+            os.close(master_fd)
+        except:
+            pass
 
 @router.post("/auth/login", response_model=AuthLoginResponse)
 async def auth_login():
-    """Start OpenCode GitHub Copilot auth flow in background"""
-    global _auth_process, _auth_output
+    """Start OpenCode GitHub Copilot auth flow"""
+    global _auth_process
+    
+    logger.info("Auth login request started")
+    
+    # Check OpenCode availability
+    if not settings.opencode_available:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"OpenCode command not found: {settings.opencode_command}"
+        )
+    
+    # Always clean up any previous process and start fresh
+    if _auth_process:
+        try:
+            if _auth_process.poll() is None:  # Process still running
+                logger.info("Terminating existing auth process to start fresh")
+                _auth_process.terminate()
+                try:
+                    _auth_process.wait(timeout=2)  # Wait up to 2 seconds for graceful termination
+                except subprocess.TimeoutExpired:
+                    _auth_process.kill()  # Force kill if it doesn't terminate gracefully
+        except:
+            pass
     
     try:
-        # Same availability check as agent service
-        if not settings.opencode_available:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"OpenCode command not found: {settings.opencode_command}"
-            )
+        # Create PTY for interactive terminal
+        master_fd, slave_fd = pty.openpty()
         
-        # Check if auth process already running
-        if _auth_process and _auth_process.poll() is None:
-            return AuthLoginResponse(
-                device_code=_auth_output.get("device_code"),
-                verification_url=_auth_output.get("verification_url")
-            )
-        
-        # Clean up any previous process
-        if _auth_process:
-            try:
-                _auth_process.terminate()
-            except:
-                pass
-        
-        # Reset output buffer
-        _auth_output = {"stdout": "", "stderr": "", "device_code": None, "verification_url": None}
-        
-        # Start auth process in background
-        cmd_args = [settings.opencode_command, "auth", "login"]
-        
+        # Start auth process
         _auth_process = subprocess.Popen(
-            cmd_args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            [settings.opencode_command, "auth", "login"],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
             text=True,
             encoding='utf-8',
             errors='replace'
         )
         
-        # Send GitHub Copilot selection
-        _auth_process.stdin.write("GitHub Copilot\n")
-        _auth_process.stdin.flush()
+        os.close(slave_fd)
+        logger.info(f"Auth process started with PID: {_auth_process.pid}")
         
-        # Start monitoring in background
-        asyncio.create_task(_monitor_auth_process(_auth_process))
+        # Wait and type "GitHub Copilot" (exact working sequence)
+        await asyncio.sleep(INITIAL_WAIT_SECONDS)
+        for char in 'GitHub Copilot':
+            os.write(master_fd, char.encode())
+            await asyncio.sleep(CHAR_DELAY_SECONDS)
+        await asyncio.sleep(ENTER_DELAY_SECONDS)
+        os.write(master_fd, b'\r')
         
-        # Wait a moment for initial output and device code
-        await asyncio.sleep(3)
+        # Monitor for device code and URL
+        device_code = None
+        verification_url = None
+        start_time = asyncio.get_event_loop().time()
         
-        return AuthLoginResponse(
-            device_code=_auth_output.get("device_code"),
-            verification_url=_auth_output.get("verification_url")
-        )
+        while (asyncio.get_event_loop().time() - start_time) < AUTH_TIMEOUT_SECONDS:
+            try:
+                ready, _, _ = select.select([master_fd], [], [], 0.1)
+                
+                if ready:
+                    data = os.read(master_fd, 1024).decode('utf-8', errors='replace')
+                    clean_line = clean_ansi_codes(data).strip()
+                    
+                    # Extract device code (always format XXXX-XXXX after "Enter code:")
+                    if not device_code and "Enter code:" in clean_line:
+                        code_match = re.search(r'Enter code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})', clean_line)
+                        if code_match:
+                            device_code = code_match.group(1)
+                            logger.info(f"Found device code: {device_code}")
+                    
+                    # Extract verification URL (always same URL)
+                    if not verification_url and GITHUB_DEVICE_URL in clean_line:
+                        verification_url = GITHUB_DEVICE_URL
+                        logger.info(f"Found verification URL: {verification_url}")
+                    
+                    # Return immediately when both found
+                    if device_code and verification_url:
+                        elapsed = asyncio.get_event_loop().time() - start_time
+                        logger.info(f"Got auth data after {elapsed:.1f} seconds")
+                        
+                        # Start background monitoring for completion
+                        asyncio.create_task(_monitor_auth_background(_auth_process, master_fd))
+                        
+                        return AuthLoginResponse(
+                            device_code=device_code,
+                            verification_url=verification_url
+                        )
+                        
+            except OSError:
+                pass
+            
+            await asyncio.sleep(0.1)
+        
+        # Timeout - cleanup and return error
+        logger.error("Timeout waiting for device code")
+        try:
+            os.close(master_fd)
+            _auth_process.terminate()
+        except:
+            pass
+        
+        raise HTTPException(status_code=500, detail="Timeout waiting for authentication data")
             
     except Exception as e:
-        # Clean up on error
+        logger.error(f"Auth process failed: {e}")
         if _auth_process:
             try:
                 _auth_process.terminate()
             except:
                 pass
-        raise HTTPException(status_code=500, detail=f"Failed to start auth process: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
 
 @router.get("/auth/status", response_model=AuthStatusResponse)
 async def auth_status():
     """Check current OpenCode authentication status"""
+    if not settings.opencode_available:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"OpenCode command not found: {settings.opencode_command}"
+        )
+    
     try:
-        # Same availability check as agent service
-        if not settings.opencode_available:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"OpenCode command not found: {settings.opencode_command}"
-            )
-        
-        # Use 'auth list' command which shows authenticated providers
-        # This is more reliable than 'auth status' which sometimes shows help
         result = subprocess.run(
             [settings.opencode_command, "auth", "list"],
             capture_output=True,
@@ -143,24 +203,18 @@ async def auth_status():
             errors='replace'
         )
         
-        is_authenticated = result.returncode == 0 and result.stdout.strip()
-        output = result.stdout.strip() if result.stdout else ""
-        
-        # Check if output contains actual providers or just help text
-        has_providers = (
-            is_authenticated and 
-            "GitHub Copilot" in output and 
-            not "Commands:" in output  # Not help text
+        # Check if GitHub Copilot is authenticated
+        is_authenticated = (
+            result.returncode == 0 and 
+            result.stdout.strip() and
+            "GitHub Copilot" in result.stdout and 
+            "Commands:" not in result.stdout  # Not help text
         )
         
-        return AuthStatusResponse(
-            authenticated=has_providers
-        )
+        return AuthStatusResponse(authenticated=is_authenticated)
             
     except subprocess.TimeoutExpired:
-        return AuthStatusResponse(
-            authenticated=False
-        )
+        return AuthStatusResponse(authenticated=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
-    
+
