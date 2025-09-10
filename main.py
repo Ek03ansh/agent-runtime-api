@@ -7,6 +7,7 @@ This is the main application entry point that sets up the FastAPI app with prope
 and middleware configuration.
 """
 
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -31,8 +32,33 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
-    logger.info("Agent Runtime API shutting down")
+    # Shutdown - cleanup background tasks and websocket connections
+    from app.services.agent_service import agent_service
+    from app.services.websocket_manager import websocket_manager
+    
+    logger.info("Agent Runtime API shutting down - cleaning up resources...")
+    
+    # First, shutdown all running OpenCode processes
+    await agent_service.shutdown_all_processes()
+    
+    # Cancel any remaining background tasks
+    if hasattr(agent_service, '_background_tasks'):
+        for task in agent_service._background_tasks:
+            if not task.done():
+                task.cancel()
+        # Wait for tasks to finish cancellation
+        if agent_service._background_tasks:
+            await asyncio.gather(*agent_service._background_tasks, return_exceptions=True)
+    
+    # Close any remaining websocket connections
+    for connections in websocket_manager.connections.values():
+        for ws in connections[:]:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+    
+    logger.info("Agent Runtime API shutdown complete")
 
 
 # Create FastAPI application

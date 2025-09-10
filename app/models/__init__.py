@@ -67,7 +67,7 @@ class Task(BaseModel):
     current_phase: Optional[str] = Field(default=None, description="Current execution phase")
     configuration: TaskConfiguration = Field(..., description="Task configuration")
     session_path: str = Field(..., description="Path to task session directory")
-    session_id: Optional[str] = Field(default=None, description="OpenCode session ID for multi-agent tasks")
+    session_id: str = Field(..., description="OpenCode session ID for multi-agent tasks")  # Made required
     created_at: datetime = Field(..., description="Task creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")

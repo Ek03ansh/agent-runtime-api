@@ -57,8 +57,14 @@ async def create_task(
             session_id=task_request.session_id
         )
         
-        # Start execution in background using asyncio
-        asyncio.create_task(agent_service.execute_task(task.id))
+        # Start execution in background using asyncio with proper task reference storage
+        background_task = asyncio.create_task(agent_service.execute_task(task.id))
+        
+        # Store background task reference to prevent garbage collection
+        if not hasattr(agent_service, '_background_tasks'):
+            agent_service._background_tasks = set()
+        agent_service._background_tasks.add(background_task)
+        background_task.add_done_callback(agent_service._background_tasks.discard)
         
         return task
         

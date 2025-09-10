@@ -58,6 +58,25 @@ class WebSocketManager:
         # Clean up disconnected clients
         for ws in disconnected:
             self.disconnect(ws, task_id)
+    
+    async def cleanup_stale_connections(self):
+        """Clean up stale WebSocket connections periodically"""
+        stale_connections = []
+        
+        for task_id, connections in self.connections.items():
+            for websocket in connections[:]:  # Create a copy to iterate
+                try:
+                    # Try to ping the connection
+                    await websocket.ping()
+                except Exception:
+                    stale_connections.append((websocket, task_id))
+        
+        # Remove stale connections
+        for websocket, task_id in stale_connections:
+            self.disconnect(websocket, task_id)
+            
+        if stale_connections:
+            logger.info(f"Cleaned up {len(stale_connections)} stale WebSocket connections")
 
     async def send_debug_message(self, task_id: str, level: str, message: str, agent: str = None):
         """Send a debug message to all clients connected to a specific task"""

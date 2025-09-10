@@ -26,6 +26,63 @@ class AgentService:
         self.tasks: Dict[str, Task] = {}
         # Import websocket_manager here to avoid circular imports
         self._websocket_manager = None
+        # Thread lock for task status updates to prevent race conditions
+        self._task_locks: Dict[str, asyncio.Lock] = {}
+        # Track running OpenCode processes for graceful shutdown
+        self._running_processes: Dict[str, asyncio.subprocess.Process] = {}
+    
+    def _get_task_lock(self, task_id: str) -> asyncio.Lock:
+        """Get or create a lock for a specific task"""
+        if task_id not in self._task_locks:
+            self._task_locks[task_id] = asyncio.Lock()
+        return self._task_locks[task_id]
+    
+    def _register_process(self, task_id: str, process: asyncio.subprocess.Process):
+        """Register a running OpenCode process for tracking"""
+        self._running_processes[task_id] = process
+    
+    def _unregister_process(self, task_id: str):
+        """Unregister a completed OpenCode process"""
+        self._running_processes.pop(task_id, None)
+    
+    async def shutdown_all_processes(self):
+        """Gracefully shutdown all running OpenCode processes"""
+        if not self._running_processes:
+            return
+        
+        logger.info(f"Shutting down {len(self._running_processes)} running OpenCode processes...")
+        
+        # First, try graceful termination
+        for task_id, process in self._running_processes.items():
+            try:
+                if process.returncode is None:  # Still running
+                    logger.info(f"Terminating OpenCode process for task {task_id}")
+                    process.terminate()
+            except Exception as e:
+                logger.warning(f"Failed to terminate process for task {task_id}: {e}")
+        
+        # Wait up to 10 seconds for graceful shutdown
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*[p.wait() for p in self._running_processes.values() if p.returncode is None], 
+                              return_exceptions=True),
+                timeout=10
+            )
+            logger.info("All OpenCode processes terminated gracefully")
+        except asyncio.TimeoutError:
+            # Force kill remaining processes
+            logger.warning("Some processes didn't terminate gracefully, force killing...")
+            for task_id, process in self._running_processes.items():
+                try:
+                    if process.returncode is None:
+                        logger.warning(f"Force killing OpenCode process for task {task_id}")
+                        process.kill()
+                        await process.wait()
+                except Exception as e:
+                    logger.error(f"Failed to kill process for task {task_id}: {e}")
+        
+        self._running_processes.clear()
+        logger.info("All OpenCode processes shutdown complete")
     
     @property
     def websocket_manager(self):
@@ -175,12 +232,28 @@ class AgentService:
         return list(self.tasks.values())
     
     async def cancel_task(self, task_id: str) -> bool:
-        """Cancel a running task"""
+        """Cancel a running task and terminate its OpenCode process"""
         task = self.tasks.get(task_id)
         if not task:
             return False
         
-        # Update task status (note: we're using thread executor so no process to kill)
+        # Terminate OpenCode process if running
+        if task_id in self._running_processes:
+            process = self._running_processes[task_id]
+            try:
+                if process.returncode is None:  # Still running
+                    logger.info(f"Terminating OpenCode process for cancelled task {task_id}")
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.wait()
+                self._unregister_process(task_id)
+            except Exception as e:
+                logger.error(f"Failed to terminate process for task {task_id}: {e}")
+        
+        # Update task status
         task.status = TaskStatus.cancelled
         task.updated_at = datetime.now()
         return True
@@ -363,6 +436,18 @@ class AgentService:
         try:
             if not (directory / ".git").exists():
                 return None
+            
+            # Check if git command is available
+            git_check = await asyncio.create_subprocess_exec(
+                "git", "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await git_check.communicate()
+            
+            if git_check.returncode != 0:
+                logger.warning("Git command not available")
+                return None
                 
             result = await asyncio.create_subprocess_exec(
                 "git", "rev-list", "--max-parents=0", "--all",
@@ -377,6 +462,8 @@ class AgentService:
                 if commit_hashes:
                     # Use the first commit hash (sorted) as OpenCode does
                     return sorted(commit_hashes)[0]
+            else:
+                logger.debug(f"Git rev-list failed: {stderr.decode().strip()}")
             return None
         except Exception as e:
             logger.debug(f"Failed to get git project ID from {directory}: {e}")
@@ -586,6 +673,9 @@ class AgentService:
                     env=env
                 )
                 
+                # Register process for shutdown tracking
+                self._register_process(task.id, process)
+                
                 # Stream output in real-time
                 stdout_lines = []
                 stderr_lines = []
@@ -640,16 +730,23 @@ class AgentService:
                     except asyncio.TimeoutError:
                         process.kill()
                         await process.wait()
+                    # Unregister timed out process
+                    self._unregister_process(task.id)
                     returncode = -1
                     stdout = '\n'.join(stdout_lines)
                     stderr = '\n'.join(stderr_lines)
                 
                 await self._send_debug(task.id, f"OpenCode completed with exit code: {returncode}", agent=primary_agent)
                 
+                # Unregister completed process
+                self._unregister_process(task.id)
+                
                 # Note: Output is already streamed in real-time above, no need to log it again here
                 
             except Exception as e:
                 await self._send_debug(task.id, f"Failed to execute OpenCode: {e}", "ERROR", agent=primary_agent)
+                # Unregister process on error
+                self._unregister_process(task.id)
                 returncode = -2
                 stdout = stderr = f"Failed to run subprocess: {e}"
             
