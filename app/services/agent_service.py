@@ -1,12 +1,12 @@
 import asyncio
 import os
 import uuid
-import subprocess
 import logging
 import shutil
-import concurrent.futures
 import hashlib
 import traceback
+import time
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 # Constants
 OPENCODE_TIMEOUT_SECONDS = 3600  # 1 hour
-STREAM_CLEANUP_TIMEOUT_SECONDS = 5
 APP_HASH_LENGTH = 12  # Characters for app workspace hash
 
 
@@ -121,36 +120,6 @@ class AgentService:
             logger.debug(f"Copied directory tree: {src} -> {dst}")
         except (OSError, PermissionError, shutil.Error) as e:
             self._handle_file_operation_error("copy directory", f"{src} to {dst}", e)
-    
-    async def _terminate_process_safely(self, process: subprocess.Popen, task_id: str, agent: str):
-        """Safely terminate process with proper cleanup for Linux"""
-        try:
-            # Try graceful termination first, then force kill
-            try:
-                # Send SIGTERM first
-                process.terminate()
-                await asyncio.sleep(2)  # Give it 2 seconds to terminate gracefully
-                
-                if process.poll() is None:  # Still running
-                    await self._send_debug(task_id, "Process didn't terminate gracefully, force killing...", "WARNING", agent)
-                    process.kill()
-                    await asyncio.sleep(1)  # Give it time to die
-                    
-                    # If it's still running, try killing the process group
-                    if process.poll() is None:
-                        try:
-                            os.killpg(os.getpgid(process.pid), 9)
-                        except (OSError, ProcessLookupError):
-                            pass  # Process might already be dead
-                            
-            except (OSError, ProcessLookupError):
-                # Process might already be dead
-                pass
-                
-            await self._send_debug(task_id, "Process terminated", "INFO", agent)
-            
-        except Exception as e:
-            await self._send_debug(task_id, f"Error terminating process: {e}", "ERROR", agent)
     
     async def create_task(self, task_type: TaskType, configuration: TaskConfiguration, session_id: str) -> Task:
         """Create a new task with specified session ID"""
@@ -275,14 +244,71 @@ class AgentService:
         except Exception as e:
             raise Exception(f"Failed to create session configuration: {str(e)}")
 
+    async def _create_opencode_session(self, session_id: str, working_dir: Path, app_url: str):
+        """Pre-create OpenCode session directory structure using app-based project isolation"""
+        import time
+        import json
+        
+        # Use app hash as project ID to isolate sessions per target application
+        project_id = self._get_app_project_id(app_url)
+        
+        # OpenCode session storage path
+        opencode_storage = Path.home() / ".local" / "share" / "opencode" / "storage"
+        project_session_dir = opencode_storage / "session" / project_id
+        project_session_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create session file following OpenCode's session structure
+        current_time = int(time.time() * 1000)  # milliseconds
+        session_data = {
+            "id": session_id,
+            "version": "0.6.4",  # Match OpenCode version
+            "projectID": project_id,
+            "directory": str(working_dir).replace("\\", "/"),  # Use forward slashes like OpenCode
+            "title": f"User Session - {session_id}",
+            "time": {
+                "created": current_time,
+                "updated": current_time
+            }
+        }
+        
+        # Write session file
+        session_file = project_session_dir / f"{session_id}.json"
+        
+        # Check if session already exists
+        if session_file.exists():
+            logger.info(f"OpenCode session already exists at {session_file} - reusing existing session")
+            return project_session_dir
+        
+        # Create new session file
+        with open(session_file, 'w') as f:
+            json.dump(session_data, f, indent=2)
+        
+        logger.info(f"Created OpenCode session file at {session_file} for app {app_url}")
+        return project_session_dir
+
+    def _get_app_project_id(self, app_url: str) -> str:
+        """Generate project ID based on app URL for proper session isolation"""
+        normalized_url = app_url.lower().strip().rstrip('/')
+        app_hash = hashlib.sha1(normalized_url.encode()).hexdigest()[:APP_HASH_LENGTH]
+        return f"app-{app_hash}"
+
+    def _should_use_session_continuation(self, task_type: TaskType) -> bool:
+        """Determine if task type should use session continuation"""
+        # Now that session_id is required, all tasks can benefit from session continuation
+        # Complete tasks need it for multi-agent workflows
+        # Single-agent tasks (plan, generate, run, fix) can benefit from existing session context
+        return task_type in [TaskType.complete, TaskType.fix, TaskType.generate, TaskType.plan, TaskType.run]
+
 
     async def _execute_opencode_pipeline(self, task: Task) -> Tuple[bool, str]:
         """Execute the OpenCode pipeline based on task type with proper session management"""
         await self._send_debug(task.id, f"Starting _execute_opencode_pipeline for task {task.id}")
         session_path = Path(task.session_path)
+        use_sessions = self._should_use_session_continuation(task.task_type)
         
         try:
             await self._send_debug(task.id, f"Using session path: {session_path}")
+            await self._send_debug(task.id, f"Session continuation enabled: {use_sessions}")
             
             # Check if session directory exists
             if not session_path.exists():
@@ -295,6 +321,11 @@ class AgentService:
             
             await self._send_debug(task.id, "Using global hardcoded GitHub Copilot authentication")
             await self._send_debug(task.id, "Global auth file will be used automatically")
+            
+            # Pre-create OpenCode session directory structure
+            await self._send_debug(task.id, f"Pre-creating OpenCode session for session_id: {task.session_id}")
+            await self._create_opencode_session(task.session_id, session_path, task.configuration.app_url)
+            await self._send_debug(task.id, f"OpenCode session {task.session_id} ready for use")
             
             # Use build agent for orchestration
             primary_agent = "build"
@@ -351,11 +382,12 @@ class AgentService:
                 "run",
                 "--print-logs",
                 "--log-level", settings.opencode_log_level,  # Use configurable log level from environment
+                "--session", task.session_id,  # Use the pre-created session
                 "--agent", primary_agent,
                 "-m", model_identifier,
                 instructions
             ]
-            await self._send_debug(task.id, f"Using {primary_agent} agent for {task.task_type} workflow", agent=primary_agent)
+            await self._send_debug(task.id, f"Using {primary_agent} agent for {task.task_type} workflow with session {task.session_id}", agent=primary_agent)
             
             # Set up environment for Linux deployment
             env = os.environ.copy()
@@ -374,111 +406,54 @@ class AgentService:
             await self._send_debug(task.id, f"About to execute command: {' '.join(cmd_args)}", agent=primary_agent)
             await self._send_debug(task.id, f"Working directory: {session_path}", agent=primary_agent)
             
-            async def run_subprocess_with_streaming():
-                """Run subprocess with real-time output streaming"""
-                try:
-                    await self._send_debug(task.id, "Starting OpenCode subprocess...", agent=primary_agent)
-                    
-                    # Create subprocess in executor
-                    loop = asyncio.get_event_loop()
-                    
-                    def create_process():
-                        try:
-                            return subprocess.Popen(
-                                cmd_args,
-                                cwd=session_path,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                env=env,
-                                text=True,
-                                encoding='utf-8',
-                                errors='replace',
-                                bufsize=1,
-                                start_new_session=True
-                            )
-                        except (OSError, PermissionError) as e:
-                            logger.error(f"Failed to create subprocess: {e}")
-                            raise RuntimeError(f"Could not start OpenCode process: {e}")
-                    
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        process = await loop.run_in_executor(executor, create_process)
-                    
-                    # Create tasks to read output streams
-                    async def read_stream(stream, prefix):
-                        """Read from stream and send to WebSocket"""
-                        try:
-                            while True:
-                                line = await loop.run_in_executor(None, stream.readline)
-                                if not line:
-                                    break
-                                line = line.strip()
-                                if line:
-                                    # Send to WebSocket - capture all output for better debugging
-                                    await self._send_debug(task.id, f"OpenCode {prefix}: {line}", agent=primary_agent)
-                        except Exception as e:
-                            await self._send_debug(task.id, f"Stream reading error ({prefix}): {e}", "ERROR", agent=primary_agent)
-                    
-                    # Start reading both streams concurrently
-                    stdout_task = asyncio.create_task(read_stream(process.stdout, "STDOUT"))
-                    stderr_task = asyncio.create_task(read_stream(process.stderr, "STDERR"))
-                    
-                    # Wait for process completion with timeout
-                    try:
-                        await asyncio.wait_for(
-                            loop.run_in_executor(None, process.wait), 
-                            timeout=OPENCODE_TIMEOUT_SECONDS
-                        )
-                        returncode = process.returncode
-                    except asyncio.TimeoutError:
-                        await self._send_debug(task.id, "OpenCode process timed out, terminating...", "ERROR", agent=primary_agent)
-                        await self._terminate_process_safely(process, task.id, primary_agent)
-                        returncode = -1
-                    
-                    # Give stream reading tasks time to finish before canceling
-                    try:
-                        await asyncio.wait_for(asyncio.gather(stdout_task, stderr_task, return_exceptions=True), timeout=STREAM_CLEANUP_TIMEOUT_SECONDS)
-                    except asyncio.TimeoutError:
-                        await self._send_debug(task.id, "Stream reading timeout, canceling tasks", "WARNING", agent=primary_agent)
-                        stdout_task.cancel()
-                        stderr_task.cancel()
-                    
-                    # Collect any remaining output
-                    stdout_remaining = ""
-                    stderr_remaining = ""
-                    try:
-                        if process.stdout:
-                            stdout_remaining = process.stdout.read() or ""
-                            if stdout_remaining.strip():
-                                await self._send_debug(task.id, f"OpenCode STDOUT (final): {stdout_remaining.strip()}", agent=primary_agent)
-                        if process.stderr:
-                            stderr_remaining = process.stderr.read() or ""
-                            if stderr_remaining.strip():
-                                await self._send_debug(task.id, f"OpenCode STDERR (final): {stderr_remaining.strip()}", agent=primary_agent)
-                    except Exception as e:
-                        await self._send_debug(task.id, f"Error reading final output: {e}", "WARNING", agent=primary_agent)
-                    
-                    # Close streams
-                    if process.stdout:
-                        process.stdout.close()
-                    if process.stderr:
-                        process.stderr.close()
-                    
-                    await self._send_debug(task.id, f"OpenCode completed with exit code: {returncode}", agent=primary_agent)
-                    return returncode, stdout_remaining, stderr_remaining
-                    
-                except Exception as e:
-                    await self._send_debug(task.id, f"Exception in subprocess: {e}", "ERROR", agent=primary_agent)
-                    return -2, "", f"Failed to run subprocess: {e}"
-            
+            # Simple subprocess execution - works reliably on Linux
             try:
-                await self._send_debug(task.id, "Running subprocess with streaming", agent=primary_agent)
-                returncode, stdout, stderr = await run_subprocess_with_streaming()
+                await self._send_debug(task.id, "Starting OpenCode subprocess...", agent=primary_agent)
                 
-                await self._send_debug(task.id, f"Subprocess completed, exit code: {returncode}", agent=primary_agent)
+                # Use asyncio.create_subprocess_exec for clean async subprocess handling
+                process = await asyncio.create_subprocess_exec(
+                    *cmd_args,
+                    cwd=session_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env
+                )
+                
+                # Wait for completion with timeout and capture output
+                try:
+                    stdout_data, stderr_data = await asyncio.wait_for(
+                        process.communicate(),
+                        timeout=OPENCODE_TIMEOUT_SECONDS
+                    )
+                    returncode = process.returncode
+                    
+                    # Decode output safely
+                    stdout = stdout_data.decode('utf-8', errors='replace').strip() if stdout_data else ""
+                    stderr = stderr_data.decode('utf-8', errors='replace').strip() if stderr_data else ""
+                    
+                except asyncio.TimeoutError:
+                    await self._send_debug(task.id, "OpenCode process timed out, terminating...", "ERROR", agent=primary_agent)
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.wait()
+                    returncode = -1
+                    stdout = stderr = ""
+                
+                await self._send_debug(task.id, f"OpenCode completed with exit code: {returncode}", agent=primary_agent)
+                
+                # Log output for debugging
+                if stdout:
+                    await self._send_debug(task.id, f"OpenCode STDOUT: {stdout[:1000]}{'...' if len(stdout) > 1000 else ''}", agent=primary_agent)
+                if stderr:
+                    await self._send_debug(task.id, f"OpenCode STDERR: {stderr[:1000]}{'...' if len(stderr) > 1000 else ''}", agent=primary_agent)
                 
             except Exception as e:
-                await self._send_debug(task.id, f"Exception during subprocess execution: {e}", "ERROR", agent=primary_agent)
-                raise
+                await self._send_debug(task.id, f"Failed to execute OpenCode: {e}", "ERROR", agent=primary_agent)
+                returncode = -2
+                stdout = stderr = f"Failed to run subprocess: {e}"
             
             # Store the output for debugging
             auth_file_info = "Global hardcoded GitHub Copilot auth"
