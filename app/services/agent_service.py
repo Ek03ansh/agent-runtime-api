@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from app.models import Task, TaskType, TaskStatus, TaskConfiguration, LogEntry, SessionFile
+from app.models import Task, TaskType, TaskStatus, TaskConfiguration, SessionFile
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -737,29 +737,6 @@ class AgentService:
                 self._unregister_process(task.id)
                 
                 # Note: Output is already streamed in real-time above, no need to log it again here
-                
-            except Exception as e:
-                await self._send_debug(task.id, f"Failed to execute OpenCode: {e}", "ERROR", agent=primary_agent)
-                # Unregister process on error
-                self._unregister_process(task.id)
-                returncode = -2
-                stdout = stderr = f"Failed to run subprocess: {e}"
-            
-            # Store the output for debugging
-            auth_file_info = "Global hardcoded GitHub Copilot auth"
-            log_entry = LogEntry(
-                agent=primary_agent,
-                model=model_identifier,
-                command=' '.join(cmd_args),
-                working_directory=str(session_path),
-                auth_file=auth_file_info,
-                exit_code=returncode,
-                stdout=stdout.strip() if stdout else "",
-                stderr=stderr.strip() if stderr else ""
-            )
-            
-            # Store logs in task for retrieval
-            task.logs.append(log_entry)
             
             if returncode != 0:
                 error_msg = f"Agent '{primary_agent}' failed with exit code {returncode}\n"

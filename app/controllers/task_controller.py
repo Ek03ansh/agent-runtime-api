@@ -88,9 +88,7 @@ async def get_task_logs(task_id: str) -> TaskLogsResponse:
     
     return TaskLogsResponse(
         task_id=task_id,
-        logs=task.logs,
         debug_logs=task.debug_logs,
-        total_log_entries=len(task.logs),
         total_debug_entries=len(task.debug_logs)
     )
 

@@ -33,30 +33,12 @@ class TaskRequest(BaseModel):
     configuration: TaskConfiguration = Field(..., description="Task configuration")
     session_id: str = Field(..., description="OpenCode session ID to continue or create")
 
-class LogEntry(BaseModel):
-    agent: str = Field(..., description="Agent name that generated this log")
-    model: str = Field(..., description="Model identifier used")
-    command: str = Field(..., description="Command executed")
-    working_directory: str = Field(..., description="Working directory")
-    auth_file: str = Field(..., description="Authentication file path")
-    exit_code: int = Field(..., description="Command exit code")
-    stdout: str = Field(..., description="Standard output")
-    stderr: str = Field(..., description="Standard error")
-
 class SessionFile(BaseModel):
     name: str = Field(..., description="File name")
     path: str = Field(..., description="Relative path from session root")
     size: int = Field(..., description="File size in bytes")
     modified: datetime = Field(..., description="Last modified timestamp")
     type: str = Field(..., description="File type (file/directory)")
-
-class TaskProgress(BaseModel):
-    task_id: str
-    status: TaskStatus
-    message: Optional[str] = None
-    error: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
 
 # Core/Internal Models
 class Task(BaseModel):
@@ -73,10 +55,6 @@ class Task(BaseModel):
     
     # Internal tracking fields (not exposed in API responses)
     error: Optional[str] = Field(default=None, description="Error message if task failed")
-    result: Optional[str] = Field(default=None, description="Task execution result summary")
-    
-    # Log storage fields (not exposed in basic API responses)
-    logs: List[LogEntry] = Field(default_factory=list, description="Detailed execution logs")
     debug_logs: List[str] = Field(default_factory=list, description="Real-time debug messages")
 
 # API Response Models
@@ -115,9 +93,7 @@ class HealthResponse(BaseModel):
 
 class TaskLogsResponse(BaseModel):
     task_id: str = Field(..., description="Task identifier")
-    logs: List[LogEntry] = Field(..., description="Detailed execution logs")
     debug_logs: List[str] = Field(..., description="Real-time debug messages")
-    total_log_entries: int = Field(..., description="Total number of log entries")
     total_debug_entries: int = Field(..., description="Total number of debug entries")
 
 class TaskListResponse(BaseModel):
