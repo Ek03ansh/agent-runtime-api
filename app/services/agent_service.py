@@ -656,87 +656,86 @@ class AgentService:
             await self._send_debug(task.id, f"Working directory: {session_path}", agent=primary_agent)
             
             # Simple subprocess execution - works reliably on Linux
+            await self._send_debug(task.id, "Starting OpenCode subprocess...", agent=primary_agent)
+            
+            # Use asyncio.create_subprocess_exec for clean async subprocess handling
+            process = await asyncio.create_subprocess_exec(
+                *cmd_args,
+                cwd=session_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            
+            # Register process for shutdown tracking
+            self._register_process(task.id, process)
+            
+            # Stream output in real-time
+            stdout_lines = []
+            stderr_lines = []
+            
+            async def stream_stdout():
+                """Stream stdout in real-time"""
+                while True:
+                    line = await process.stdout.readline()
+                    if not line:
+                        break
+                    line_text = line.decode('utf-8', errors='replace').rstrip()
+                    if line_text:
+                        stdout_lines.append(line_text)
+                        await self._send_debug(task.id, f"[STDOUT] {line_text}", agent=primary_agent)
+            
+            async def stream_stderr():
+                """Stream stderr in real-time"""
+                while True:
+                    line = await process.stderr.readline()
+                    if not line:
+                        break
+                    line_text = line.decode('utf-8', errors='replace').rstrip()
+                    if line_text:
+                        stderr_lines.append(line_text)
+                        await self._send_debug(task.id, f"[STDERR] {line_text}", agent=primary_agent)
+            
+            # Wait for completion with timeout and stream output
             try:
-                await self._send_debug(task.id, "Starting OpenCode subprocess...", agent=primary_agent)
+                # Start streaming tasks
+                stdout_task = asyncio.create_task(stream_stdout())
+                stderr_task = asyncio.create_task(stream_stderr())
                 
-                # Use asyncio.create_subprocess_exec for clean async subprocess handling
-                process = await asyncio.create_subprocess_exec(
-                    *cmd_args,
-                    cwd=session_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=env
+                # Wait for process completion with timeout
+                returncode = await asyncio.wait_for(
+                    process.wait(),
+                    timeout=OPENCODE_TIMEOUT_SECONDS
                 )
                 
-                # Register process for shutdown tracking
-                self._register_process(task.id, process)
+                # Ensure all output is captured
+                await stdout_task
+                await stderr_task
                 
-                # Stream output in real-time
-                stdout_lines = []
-                stderr_lines = []
+                # Join lines for final output
+                stdout = '\n'.join(stdout_lines)
+                stderr = '\n'.join(stderr_lines)
                 
-                async def stream_stdout():
-                    """Stream stdout in real-time"""
-                    while True:
-                        line = await process.stdout.readline()
-                        if not line:
-                            break
-                        line_text = line.decode('utf-8', errors='replace').rstrip()
-                        if line_text:
-                            stdout_lines.append(line_text)
-                            await self._send_debug(task.id, f"[STDOUT] {line_text}", agent=primary_agent)
-                
-                async def stream_stderr():
-                    """Stream stderr in real-time"""
-                    while True:
-                        line = await process.stderr.readline()
-                        if not line:
-                            break
-                        line_text = line.decode('utf-8', errors='replace').rstrip()
-                        if line_text:
-                            stderr_lines.append(line_text)
-                            await self._send_debug(task.id, f"[STDERR] {line_text}", agent=primary_agent)
-                
-                # Wait for completion with timeout and stream output
+            except asyncio.TimeoutError:
+                await self._send_debug(task.id, "OpenCode process timed out, terminating...", "ERROR", agent=primary_agent)
+                process.terminate()
                 try:
-                    # Start streaming tasks
-                    stdout_task = asyncio.create_task(stream_stdout())
-                    stderr_task = asyncio.create_task(stream_stderr())
-                    
-                    # Wait for process completion with timeout
-                    returncode = await asyncio.wait_for(
-                        process.wait(),
-                        timeout=OPENCODE_TIMEOUT_SECONDS
-                    )
-                    
-                    # Ensure all output is captured
-                    await stdout_task
-                    await stderr_task
-                    
-                    # Join lines for final output
-                    stdout = '\n'.join(stdout_lines)
-                    stderr = '\n'.join(stderr_lines)
-                    
+                    await asyncio.wait_for(process.wait(), timeout=5)
                 except asyncio.TimeoutError:
-                    await self._send_debug(task.id, "OpenCode process timed out, terminating...", "ERROR", agent=primary_agent)
-                    process.terminate()
-                    try:
-                        await asyncio.wait_for(process.wait(), timeout=5)
-                    except asyncio.TimeoutError:
-                        process.kill()
-                        await process.wait()
-                    # Unregister timed out process
-                    self._unregister_process(task.id)
-                    returncode = -1
-                    stdout = '\n'.join(stdout_lines)
-                    stderr = '\n'.join(stderr_lines)
-                
-                await self._send_debug(task.id, f"OpenCode completed with exit code: {returncode}", agent=primary_agent)
-                
-                # Unregister completed process
+                    process.kill()
+                    await process.wait()
+                # Unregister timed out process
                 self._unregister_process(task.id)
-                
-                # Note: Output is already streamed in real-time above, no need to log it again here
+                returncode = -1
+                stdout = '\n'.join(stdout_lines)
+                stderr = '\n'.join(stderr_lines)
+            
+            await self._send_debug(task.id, f"OpenCode completed with exit code: {returncode}", agent=primary_agent)
+            
+            # Unregister completed process
+            self._unregister_process(task.id)
+            
+            # Note: Output is already streamed in real-time above, no need to log it again here
             
             if returncode != 0:
                 error_msg = f"Agent '{primary_agent}' failed with exit code {returncode}\n"
@@ -747,7 +746,7 @@ class AgentService:
                 if stderr.strip():
                     error_msg += f"STDERR: {stderr.strip()}"
                 return False, error_msg
-            
+                
             # Log successful completion
             await self._send_debug(task.id, f"Agent '{primary_agent}' completed successfully", agent=primary_agent)
             if stdout:

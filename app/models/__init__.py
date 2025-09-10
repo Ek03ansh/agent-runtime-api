@@ -69,6 +69,7 @@ class TaskResponse(BaseModel):
     created_at: datetime = Field(..., description="Task creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
+    error: Optional[str] = Field(default=None, description="Error message if task failed")
     
     @classmethod
     def from_task(cls, task: Task) -> "TaskResponse":
@@ -82,7 +83,8 @@ class TaskResponse(BaseModel):
             session_id=task.session_id,
             created_at=task.created_at,
             updated_at=task.updated_at,
-            completed_at=task.completed_at
+            completed_at=task.completed_at,
+            error=task.error
         )
 
 class HealthResponse(BaseModel):
