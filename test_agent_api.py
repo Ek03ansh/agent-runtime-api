@@ -149,7 +149,7 @@ def test_all_apis():
     print("🎯 API Testing Complete!")
     return True
 
-def create_task(task_type='complete', session_id=None, app_url=None):
+def create_task(task_type='complete', session_id=None, app_url=None, instructions=''):
     """Create a task with flexible options"""
     base_url = get_base_url()
     
@@ -168,7 +168,7 @@ def create_task(task_type='complete', session_id=None, app_url=None):
         'session_id': session_id,
         'configuration': {
             'app_url': app_url,
-            'instructions': ''
+            'instructions': instructions
         }
     }
     
@@ -386,9 +386,10 @@ def interactive_mode():
     print("2. plan - Create test plan only")
     print("3. generate - Generate tests only")
     print("4. fix - Fix existing tests only")
+    print("5. custom - Direct user instructions (iterative)")
     
-    choice = input("\nEnter choice (1-4) [1]: ").strip() or "1"
-    task_types = {"1": "complete", "2": "plan", "3": "generate", "4": "fix"}
+    choice = input("\nEnter choice (1-5) [1]: ").strip() or "1"
+    task_types = {"1": "complete", "2": "plan", "3": "generate", "4": "fix", "5": "custom"}
     task_type = task_types.get(choice, "complete")
     
     # Get session ID
@@ -398,8 +399,17 @@ def interactive_mode():
     default_url = "https://demo.playwright.dev/todomvc/#/"
     app_url = input(f"\n🌐 Enter target URL [{default_url}]: ").strip() or default_url
     
+    # Get custom instructions for custom task type
+    instructions = ""
+    if task_type == "custom":
+        print(f"\n📝 Custom task type selected - provide direct instructions:")
+        instructions = input("Instructions: ").strip()
+        if not instructions:
+            print("❌ Custom task type requires instructions!")
+            return
+    
     # Create task
-    task_id = create_task(task_type, session_id, app_url)
+    task_id = create_task(task_type, session_id, app_url, instructions)
     
     if task_id:
         monitor_choice = input("\n👀 Monitor task progress? (y/N): ").strip().lower()
