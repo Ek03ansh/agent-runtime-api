@@ -248,43 +248,98 @@ class AgentService:
         """Pre-create OpenCode session directory structure using app-based project isolation"""
         import time
         import json
+        import os
         
-        # Use app hash as project ID to isolate sessions per target application
-        project_id = self._get_app_project_id(app_url)
-        
-        # OpenCode session storage path
-        opencode_storage = Path.home() / ".local" / "share" / "opencode" / "storage"
-        project_session_dir = opencode_storage / "session" / project_id
-        project_session_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create session file following OpenCode's session structure
-        current_time = int(time.time() * 1000)  # milliseconds
-        session_data = {
-            "id": session_id,
-            "version": "0.6.4",  # Match OpenCode version
-            "projectID": project_id,
-            "directory": str(working_dir).replace("\\", "/"),  # Use forward slashes like OpenCode
-            "title": f"User Session - {session_id}",
-            "time": {
-                "created": current_time,
-                "updated": current_time
+        try:
+            # Use app hash as project ID to isolate sessions per target application
+            project_id = self._get_app_project_id(app_url)
+            logger.info(f"Creating session for project_id: {project_id} (app: {app_url})")
+            
+            # OpenCode session storage path - check both Linux and Windows locations
+            # First try Windows user directory (when running in WSL)
+            windows_opencode_storage = Path("/mnt/c/users") / os.getenv("USER", "user") / ".local" / "share" / "opencode" / "storage"
+            linux_opencode_storage = Path.home() / ".local" / "share" / "opencode" / "storage"
+            
+            # Use Windows path if it exists, otherwise fall back to Linux path
+            if windows_opencode_storage.exists():
+                opencode_storage = windows_opencode_storage
+                logger.info(f"Using Windows OpenCode storage path: {opencode_storage}")
+            elif linux_opencode_storage.exists():
+                opencode_storage = linux_opencode_storage
+                logger.info(f"Using Linux OpenCode storage path: {opencode_storage}")
+            else:
+                logger.error(f"OpenCode storage directory not found in either location:")
+                logger.error(f"  Windows: {windows_opencode_storage}")
+                logger.error(f"  Linux: {linux_opencode_storage}")
+                raise Exception(f"OpenCode storage directory not found")
+            
+            # Create session directory structure
+            session_base_dir = opencode_storage / "session"
+            project_session_dir = session_base_dir / project_id
+            
+            logger.info(f"Creating session directory: {project_session_dir}")
+            
+            # Create directories with explicit error handling
+            try:
+                project_session_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Successfully created session directory: {project_session_dir}")
+            except PermissionError as e:
+                logger.error(f"Permission denied creating session directory: {e}")
+                raise Exception(f"Permission denied creating session directory: {project_session_dir}")
+            except Exception as e:
+                logger.error(f"Failed to create session directory: {e}")
+                raise Exception(f"Failed to create session directory: {project_session_dir} - {e}")
+            
+            # Verify directory was created
+            if not project_session_dir.exists():
+                logger.error(f"Session directory was not created: {project_session_dir}")
+                raise Exception(f"Session directory creation failed: {project_session_dir}")
+            
+            # Create session file following OpenCode's session structure
+            current_time = int(time.time() * 1000)  # milliseconds
+            session_data = {
+                "id": session_id,
+                "version": "0.6.4",  # Match OpenCode version
+                "projectID": project_id,
+                "directory": str(working_dir).replace("\\", "/"),  # Use forward slashes like OpenCode
+                "title": f"User Session - {session_id}",
+                "time": {
+                    "created": current_time,
+                    "updated": current_time
+                }
             }
-        }
-        
-        # Write session file
-        session_file = project_session_dir / f"{session_id}.json"
-        
-        # Check if session already exists
-        if session_file.exists():
-            logger.info(f"OpenCode session already exists at {session_file} - reusing existing session")
+            
+            # Write session file
+            session_file = project_session_dir / f"{session_id}.json"
+            
+            # Check if session already exists
+            if session_file.exists():
+                logger.info(f"OpenCode session already exists at {session_file} - reusing existing session")
+                return project_session_dir
+            
+            # Create new session file with error handling
+            try:
+                with open(session_file, 'w') as f:
+                    json.dump(session_data, f, indent=2)
+                logger.info(f"Created OpenCode session file at {session_file} for app {app_url}")
+            except PermissionError as e:
+                logger.error(f"Permission denied writing session file: {e}")
+                raise Exception(f"Permission denied writing session file: {session_file}")
+            except Exception as e:
+                logger.error(f"Failed to write session file: {e}")
+                raise Exception(f"Failed to write session file: {session_file} - {e}")
+            
+            # Verify session file was created
+            if not session_file.exists():
+                logger.error(f"Session file was not created: {session_file}")
+                raise Exception(f"Session file creation failed: {session_file}")
+            
+            logger.info(f"Successfully created OpenCode session: {session_file}")
             return project_session_dir
-        
-        # Create new session file
-        with open(session_file, 'w') as f:
-            json.dump(session_data, f, indent=2)
-        
-        logger.info(f"Created OpenCode session file at {session_file} for app {app_url}")
-        return project_session_dir
+            
+        except Exception as e:
+            logger.error(f"Failed to create OpenCode session: {e}")
+            raise
 
     def _get_app_project_id(self, app_url: str) -> str:
         """Generate project ID based on app URL for proper session isolation"""
