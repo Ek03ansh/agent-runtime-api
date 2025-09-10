@@ -126,10 +126,10 @@ class AgentService:
         # Create app-specific directory structure in our repo for working files
         normalized_url = configuration.app_url.lower().strip().rstrip('/')
         app_hash = hashlib.sha1(normalized_url.encode()).hexdigest()[:APP_HASH_LENGTH]
-        temp_project_id = f"app-{app_hash}"
+        app_project_id = f"app-{app_hash}"
         
         # Working directory: Our repo's sessions folder (where artifacts go)
-        working_dir = settings.session_root / temp_project_id / session_id
+        working_dir = settings.session_root / app_project_id / session_id
         
         task = Task(
             id=task_id,
@@ -358,12 +358,6 @@ class AgentService:
             logger.error(f"Failed to create OpenCode session: {e}")
             raise
 
-    def _get_app_project_id(self, app_url: str) -> str:
-        """Generate consistent project ID based on app URL for proper session isolation"""
-        normalized_url = app_url.lower().strip().rstrip('/')
-        app_hash = hashlib.sha1(normalized_url.encode()).hexdigest()[:APP_HASH_LENGTH]
-        return f"app-{app_hash}"
-
     async def _get_git_project_id(self, directory: Path) -> Optional[str]:
         """Get project ID from git repository like OpenCode does"""
         try:
@@ -475,23 +469,13 @@ class AgentService:
             logger.error(f"Git initialization failed for {app_url}: {e}")
             raise Exception(f"Git repository initialization failed: {str(e)}")
 
-    def _should_use_session_continuation(self, task_type: TaskType) -> bool:
-        """Determine if task type should use session continuation"""
-        # Now that session_id is required, all tasks can benefit from session continuation
-        # Complete tasks need it for multi-agent workflows
-        # Single-agent tasks (plan, generate, run, fix) can benefit from existing session context
-        return task_type in [TaskType.complete, TaskType.fix, TaskType.generate, TaskType.plan, TaskType.run]
-
-
     async def _execute_opencode_pipeline(self, task: Task) -> Tuple[bool, str]:
         """Execute the OpenCode pipeline based on task type with proper session management"""
         await self._send_debug(task.id, f"Starting _execute_opencode_pipeline for task {task.id}")
         session_path = Path(task.session_path)
-        use_sessions = self._should_use_session_continuation(task.task_type)
         
         try:
             await self._send_debug(task.id, f"Using session path: {session_path}")
-            await self._send_debug(task.id, f"Session continuation enabled: {use_sessions}")
             
             # Check if session directory exists
             if not session_path.exists():
