@@ -27,7 +27,6 @@ class TaskConfiguration(BaseModel):
     app_url: str = Field(..., description="Target application URL to test")
     sign_in: Optional[SignInDetails] = Field(default=None, description="Sign-in details if authentication required")
     instructions: Optional[str] = Field(default=None, description="Additional instructions for the agent")
-    max_retries: Optional[int] = Field(default=3, description="Maximum number of retries for failed operations")
 
 class TaskRequest(BaseModel):
     task_type: TaskType = Field(..., description="Type of task to execute")
@@ -54,27 +53,59 @@ class SessionFile(BaseModel):
 class TaskProgress(BaseModel):
     task_id: str
     status: TaskStatus
-    current_phase: Optional[str] = None
     message: Optional[str] = None
     error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
+# Core/Internal Models
 class Task(BaseModel):
+    """Core Task model for internal use"""
     id: str = Field(..., description="Unique task identifier")
     task_type: TaskType = Field(..., description="Type of task")
     status: TaskStatus = Field(..., description="Current task status")
-    current_phase: Optional[str] = Field(default=None, description="Current execution phase")
     configuration: TaskConfiguration = Field(..., description="Task configuration")
     session_path: str = Field(..., description="Path to task session directory")
-    session_id: str = Field(..., description="OpenCode session ID for multi-agent tasks")  # Made required
+    session_id: str = Field(..., description="OpenCode session ID for multi-agent tasks")
     created_at: datetime = Field(..., description="Task creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
+    
+    # Internal tracking fields (not exposed in API responses)
     error: Optional[str] = Field(default=None, description="Error message if task failed")
     result: Optional[str] = Field(default=None, description="Task execution result summary")
+    
+    # Log storage fields (not exposed in basic API responses)
     logs: List[LogEntry] = Field(default_factory=list, description="Detailed execution logs")
     debug_logs: List[str] = Field(default_factory=list, description="Real-time debug messages")
+
+# API Response Models
+class TaskResponse(BaseModel):
+    """Clean task response for API endpoints"""
+    id: str = Field(..., description="Unique task identifier")
+    task_type: TaskType = Field(..., description="Type of task")
+    status: TaskStatus = Field(..., description="Current task status")
+    configuration: TaskConfiguration = Field(..., description="Task configuration")
+    session_path: str = Field(..., description="Path to task session directory")
+    session_id: str = Field(..., description="OpenCode session ID for multi-agent tasks")
+    created_at: datetime = Field(..., description="Task creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+    completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
+    
+    @classmethod
+    def from_task(cls, task: Task) -> "TaskResponse":
+        """Convert internal Task to API response"""
+        return cls(
+            id=task.id,
+            task_type=task.task_type,
+            status=task.status,
+            configuration=task.configuration,
+            session_path=task.session_path,
+            session_id=task.session_id,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            completed_at=task.completed_at
+        )
 
 class HealthResponse(BaseModel):
     status: str = "healthy"
@@ -90,8 +121,9 @@ class TaskLogsResponse(BaseModel):
     total_debug_entries: int = Field(..., description="Total number of debug entries")
 
 class TaskListResponse(BaseModel):
-    tasks: List[Task]
-    total_tasks: int
+    """Response model for listing tasks"""
+    tasks: List[TaskResponse] = Field(..., description="List of tasks")
+    total_tasks: int = Field(..., description="Total number of tasks")
 
 class DebugMessage(BaseModel):
     timestamp: datetime = Field(..., description="Message timestamp")

@@ -95,14 +95,14 @@ class WebSocketManager:
         
         await self._send_to_clients(task_id, json.dumps(event.dict(), default=str))
     
-    async def send_status_update(self, task_id: str, status: str, phase: str = None):
+    async def send_status_update(self, task_id: str, status: str, message: str = None):
         """Send a status update to all clients connected to a specific task"""
         event = StreamEvent(
             event_type="status",
             data={
                 "task_id": task_id,
                 "status": status,
-                "phase": phase,
+                "message": message,
                 "timestamp": datetime.now().isoformat()
             }
         )

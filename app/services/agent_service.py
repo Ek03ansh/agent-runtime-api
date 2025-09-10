@@ -97,8 +97,6 @@ class AgentService:
         # Store in task debug logs
         task = self.tasks.get(task_id)
         if task:
-            if not hasattr(task, 'debug_logs'):
-                task.debug_logs = []
             timestamp = datetime.now().strftime("%H:%M:%S")
             formatted_message = f"[{timestamp}] {message}"
             task.debug_logs.append(formatted_message)
@@ -272,7 +270,6 @@ class AgentService:
             await self._create_opencode_config(task)
             
             task.status = TaskStatus.running
-            task.current_phase = f"Executing {task.task_type.value} pipeline"
             task.updated_at = datetime.now()
             
             # Execute based on task type
@@ -280,7 +277,6 @@ class AgentService:
             
             if success:
                 task.status = TaskStatus.completed
-                task.current_phase = "Completed"
                 task.completed_at = datetime.now()
             else:
                 task.status = TaskStatus.failed
@@ -588,7 +584,6 @@ class AgentService:
             
             # Execute the primary agent which will orchestrate sub-agents
             await self._send_debug(task.id, f"Starting primary agent: {primary_agent}", agent=primary_agent)
-            task.current_phase = f"Running {primary_agent} (orchestrating sub-agents)"
             task.updated_at = datetime.now()
             
             # Send status update via WebSocket
@@ -596,7 +591,7 @@ class AgentService:
                 await self.websocket_manager.send_status_update(
                     task.id, 
                     task.status.value, 
-                    task.current_phase
+                    f"Running {primary_agent} (orchestrating sub-agents)"
                 )
             except Exception as e:
                 logger.warning(f"Failed to send status update via WebSocket: {e}")
@@ -764,8 +759,6 @@ class AgentService:
             )
             
             # Store logs in task for retrieval
-            if not hasattr(task, 'logs'):
-                task.logs = []
             task.logs.append(log_entry)
             
             if returncode != 0:
@@ -784,7 +777,6 @@ class AgentService:
                 await self._send_debug(task.id, f"Agent output preview: {stdout[:500]}...", agent=primary_agent)
             
             # Ensure final task update
-            task.current_phase = "Completed"
             task.updated_at = datetime.now()
             
             # Send completion notification via WebSocket

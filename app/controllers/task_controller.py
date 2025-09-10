@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from app.core.config import settings
 from app.models import (
-    HealthResponse, SessionFile, Task, TaskListResponse, TaskLogsResponse, 
+    HealthResponse, SessionFile, Task, TaskResponse, TaskListResponse, TaskLogsResponse, 
     TaskRequest, TaskStatus
 )
 from app.services.agent_service import agent_service
@@ -44,10 +44,10 @@ def should_exclude_path(file_path: Path) -> bool:
     """Check if path should be excluded from processing"""
     return any(excluded in file_path.parts for excluded in EXCLUDED_DIRS)
 
-@router.post("/tasks", response_model=Task, status_code=201)
+@router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(
     task_request: TaskRequest
-) -> Task:
+) -> TaskResponse:
     """Create a new task"""
     try:
         # Create the task
@@ -66,18 +66,18 @@ async def create_task(
         agent_service._background_tasks.add(background_task)
         background_task.add_done_callback(agent_service._background_tasks.discard)
         
-        return task
+        return TaskResponse.from_task(task)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create task: {str(e)}")
 
-@router.get("/tasks/{task_id}", response_model=Task)
-async def get_task(task_id: str) -> Task:
+@router.get("/tasks/{task_id}", response_model=TaskResponse)
+async def get_task(task_id: str) -> TaskResponse:
     """Get task by ID"""
     task = await agent_service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task
+    return TaskResponse.from_task(task)
 
 @router.get("/tasks/{task_id}/logs", response_model=TaskLogsResponse)
 async def get_task_logs(task_id: str) -> TaskLogsResponse:
@@ -86,14 +86,12 @@ async def get_task_logs(task_id: str) -> TaskLogsResponse:
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    logs = getattr(task, 'logs', [])
-    debug_logs = getattr(task, 'debug_logs', [])
     return TaskLogsResponse(
         task_id=task_id,
-        logs=logs,
-        debug_logs=debug_logs,
-        total_log_entries=len(logs),
-        total_debug_entries=len(debug_logs)
+        logs=task.logs,
+        debug_logs=task.debug_logs,
+        total_log_entries=len(task.logs),
+        total_debug_entries=len(task.debug_logs)
     )
 
 @router.websocket("/tasks/{task_id}/stream")
@@ -112,11 +110,11 @@ async def stream_task_logs(websocket: WebSocket, task_id: str):
         await websocket_manager.send_status_update(
             task_id, 
             task.status.value, 
-            task.current_phase
+            None  # No phase info needed since we use status
         )
         
         # Send existing debug logs if any
-        if hasattr(task, 'debug_logs') and task.debug_logs:
+        if task.debug_logs:
             for debug_log in task.debug_logs:
                 await websocket_manager.send_debug_message(
                     task_id, 
@@ -140,7 +138,7 @@ async def stream_task_logs(websocket: WebSocket, task_id: str):
                         await websocket_manager.send_status_update(
                             task_id,
                             current_task.status.value,
-                            current_task.current_phase
+                            None  # No phase info needed since we use status
                         )
                         
             except WebSocketDisconnect:
@@ -160,19 +158,19 @@ async def list_tasks() -> TaskListResponse:
     """List all tasks"""
     tasks = await agent_service.get_all_tasks()
     return TaskListResponse(
-        tasks=tasks,
+        tasks=[TaskResponse.from_task(task) for task in tasks],
         total_tasks=len(tasks)
     )
 
-@router.post("/tasks/{task_id}/cancel", response_model=Task)
-async def cancel_task(task_id: str) -> Task:
+@router.post("/tasks/{task_id}/cancel", response_model=TaskResponse)
+async def cancel_task(task_id: str) -> TaskResponse:
     """Cancel a running task"""
     success = await agent_service.cancel_task(task_id)
     if not success:
         raise HTTPException(status_code=404, detail="Task not found")
     
     task = await agent_service.get_task(task_id)
-    return task
+    return TaskResponse.from_task(task)
 
 # Session management endpoints
 @router.get("/sessions", response_model=List[str])
