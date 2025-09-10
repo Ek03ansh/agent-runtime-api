@@ -13,9 +13,9 @@ class Settings:
         self.session_root = Path(os.getenv("SESSION_ROOT", "./sessions"))
         self.opencode_command = os.getenv("OPENCODE_COMMAND", "opencode")
         self.opencode_config_path = Path(os.getenv("OPENCODE_CONFIG_PATH", "./opencode.json"))
+        self.opencode_dir = Path(os.getenv("OPENCODE_DIR", "./.opencode"))
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "5001"))
-        self.debug = os.getenv("DEBUG", "false").lower() == "true"
         self.log_level = os.getenv("LOG_LEVEL", "INFO").upper()
         self.opencode_log_level = os.getenv("OPENCODE_LOG_LEVEL", "WARN").upper()
         self.cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")

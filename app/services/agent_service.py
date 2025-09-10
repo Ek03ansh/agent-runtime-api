@@ -261,8 +261,8 @@ class AgentService:
             else:
                 logger.warning(f"OpenCode config not found at {settings.opencode_config_path}")
             
-            # Copy .opencode directory from project root (standard OpenCode structure)
-            project_opencode_dir = Path(".opencode")
+            # Copy .opencode directory from configured path (contains prompts and agent configs)
+            project_opencode_dir = settings.opencode_dir
             session_opencode_dir = session_path / ".opencode"
             
             if project_opencode_dir.exists():
@@ -270,7 +270,7 @@ class AgentService:
                 self._safe_copy_tree(project_opencode_dir, session_opencode_dir)
                 logger.debug(f"Copied .opencode directory to session: {session_opencode_dir}")
             else:
-                logger.info("No .opencode directory found in project root - using OpenCode defaults")
+                logger.info(f"No .opencode directory found at {settings.opencode_dir} - using OpenCode defaults")
             
         except Exception as e:
             raise Exception(f"Failed to create session configuration: {str(e)}")

@@ -207,9 +207,9 @@ The API can be configured via environment variables:
 - `WORKSPACE_ROOT`: Directory for task workspaces (default: "./workspaces")
 - `OPENCODE_COMMAND`: OpenCode command (default: "opencode")
 - `OPENCODE_CONFIG_PATH`: Path to OpenCode configuration file (default: "./opencode.json")
+- `OPENCODE_DIR`: Path to OpenCode directory containing prompts and agents (default: "./.opencode")
 - `HOST`: Server host (default: "0.0.0.0")
 - `PORT`: Server port (default: "5001")
-- `DEBUG`: Enable debug mode (default: "false")
 - `CORS_ORIGINS`: Allowed CORS origins (default: "*")
 
 ## Example Usage

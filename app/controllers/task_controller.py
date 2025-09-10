@@ -297,19 +297,3 @@ async def health_check() -> HealthResponse:
         timestamp=datetime.now(),
         opencode_available=settings.opencode_available
     )
-
-@router.get("/config")
-async def get_configuration():
-    """Get current API configuration"""
-    return {
-        "provider": settings.provider,
-        "model": settings.model,
-        "auth_type": settings.auth_type,
-        "opencode_command": settings.opencode_command,
-        "opencode_available": settings.opencode_available,
-        "session_root": str(settings.session_root),
-        "environment": "production" if not settings.debug else "development",
-        "available_task_types": ["complete", "plan", "generate", "run", "fix"],
-        "platform": "linux",  # Linux-only deployment
-        "description": "Agent Runtime API with GitHub Copilot integration"
-    }

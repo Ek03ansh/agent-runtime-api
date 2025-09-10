@@ -92,23 +92,6 @@ def test_all_apis():
     except Exception as e:
         print(f"❌ Health API error: {e}")
     
-    # Test config API
-    print(f"\n⚙️ Testing Config API...")
-    try:
-        config_response = requests.get(f'{base_url}/config', timeout=5)
-        if config_response.status_code == 200:
-            config_data = config_response.json()
-            print(f"✅ Config API working!")
-            print(f"   Provider: {config_data.get('provider')}")
-            print(f"   Model: {config_data.get('model')}")
-            print(f"   Auth Type: {config_data.get('auth_type')}")
-            print(f"   OpenCode Command: {config_data.get('opencode_command')}")
-            print(f"   Available Task Types: {config_data.get('available_task_types')}")
-        else:
-            print(f"❌ Config API failed: {config_response.status_code}")
-    except Exception as e:
-        print(f"❌ Config API error: {e}")
-    
     # Test tasks list API
     print(f"\n📋 Testing Tasks List API...")
     try:
