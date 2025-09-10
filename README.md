@@ -194,11 +194,11 @@ The API will be available at:
 
 ## Task Types
 
-- **complete**: Full pipeline (plan → generate → run)
+- **complete**: Full pipeline (plan → generate → fix)
 - **plan**: Analysis and test planning only
 - **generate**: Generate tests from existing plan
-- **run**: Execute existing tests
 - **fix**: Debug and repair failing tests
+- **custom**: Execute direct user instructions (for iterative workflows)
 
 ## Configuration
 

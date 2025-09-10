@@ -7,8 +7,8 @@ class TaskType(str, Enum):
     complete = "complete"
     plan = "plan"
     generate = "generate"
-    run = "run"
     fix = "fix"
+    custom = "custom"
 
 class TaskStatus(str, Enum):
     pending = "pending"

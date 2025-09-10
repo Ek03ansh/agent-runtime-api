@@ -604,23 +604,24 @@ class AgentService:
                 TaskType.complete: ".opencode/prompts/complete-testing-workflow.md",
                 TaskType.plan: ".opencode/prompts/test-planning.md", 
                 TaskType.generate: ".opencode/prompts/test-generation.md",
-                TaskType.run: ".opencode/prompts/test-fixing.md",
-                TaskType.fix: ".opencode/prompts/test-fixing.md"
+                TaskType.fix: ".opencode/prompts/test-fixing.md",
+                TaskType.custom: None  # Use instructions directly, no prompt file
             }
             
-            # Get prompt file path (all task types are mapped)
-            prompt_file_path = Path(prompt_files[task.task_type])
+            # Get prompt file path (handle custom task type)
+            prompt_file_path = prompt_files[task.task_type]
             
-            try:
+            if task.task_type == TaskType.custom:
+                # For custom tasks, use instructions directly
+                instructions = task.configuration.instructions
+            else:
+                # For other task types, read from prompt file
                 with open(prompt_file_path, 'r', encoding='utf-8') as f:
                     instructions = f.read().replace("{app_url}", app_url)
-            except Exception as e:
-                await self._send_debug(task.id, f"Error reading prompt file {prompt_file_path}: {e}", "WARNING")
-                instructions = f"Help me test the web application at '{app_url}' using the appropriate Playwright testing workflow and specialized agents."
-            
-            # Add custom instructions if provided
-            if task.configuration.instructions:
-                instructions = f"{task.configuration.instructions}\n\n{instructions}"
+                
+                # Add custom instructions if provided
+                if task.configuration.instructions:
+                    instructions = f"{task.configuration.instructions}\n\n{instructions}"
             
             # Build command with hardcoded GitHub Copilot configuration
             model_identifier = f"{settings.provider}/{settings.model}"  # github-copilot/claude-sonnet-4
