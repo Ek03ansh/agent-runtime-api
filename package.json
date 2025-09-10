@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "setup": "sudo npm install -g opencode-ai && npm install && npx playwright install chromium && npx playwright install-deps",
+    "setup:docker": "npm install -g opencode-ai && npm install && npx playwright install-deps chromium",
     "install-browsers": "npx playwright install chromium",
     "install-deps": "npx playwright install-deps",
     "verify": "opencode --version",
@@ -24,7 +25,7 @@
   "description": "Agent Runtime API for OpenCode with Playwright MCP integration",
   "devDependencies": {
     "@playwright/mcp": "next",
-    "@playwright/test": "1.56.0-alpha-2025-09-02",
+    "@playwright/test": "next",
     "@types/node": "^24.3.0"
   },
   "dependencies": {
