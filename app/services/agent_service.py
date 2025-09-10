@@ -105,7 +105,6 @@ class AgentService:
         try:
             shutil.copy2(src, dst)
             self._ensure_file_permissions(dst)
-            logger.debug(f"Copied file: {src} -> {dst}")
         except (OSError, PermissionError, shutil.Error) as e:
             self._handle_file_operation_error("copy file", f"{src} to {dst}", e)
     
@@ -117,28 +116,27 @@ class AgentService:
             shutil.copytree(src, dst)
             # Apply permissions recursively in one pass
             self._apply_permissions_recursively(dst)
-            logger.debug(f"Copied directory tree: {src} -> {dst}")
         except (OSError, PermissionError, shutil.Error) as e:
             self._handle_file_operation_error("copy directory", f"{src} to {dst}", e)
     
     async def create_task(self, task_type: TaskType, configuration: TaskConfiguration, session_id: str) -> Task:
-        """Create a new task with specified session ID"""
+        """Create a new task with proper separation of OpenCode storage vs working directory"""
         task_id = str(uuid.uuid4())
         
-        # Create app-specific directory structure first
+        # Create app-specific directory structure in our repo for working files
         normalized_url = configuration.app_url.lower().strip().rstrip('/')
         app_hash = hashlib.sha1(normalized_url.encode()).hexdigest()[:APP_HASH_LENGTH]
+        temp_project_id = f"app-{app_hash}"
         
-        # Structure: sessions/app-{hash}/{session_id}
-        app_path = settings.session_root / f"app-{app_hash}"
-        session_path = app_path / session_id
+        # Working directory: Our repo's sessions folder (where artifacts go)
+        working_dir = settings.session_root / temp_project_id / session_id
         
         task = Task(
             id=task_id,
             task_type=task_type,
             status=TaskStatus.pending,
             configuration=configuration,
-            session_path=str(session_path),
+            session_path=str(working_dir),
             session_id=session_id,
             created_at=datetime.now(),
             updated_at=datetime.now()
@@ -146,12 +144,25 @@ class AgentService:
         
         self.tasks[task_id] = task
         
-        # Create session directory under app directory with proper permissions
+        # Create working directory in our repo
         try:
-            session_path.mkdir(parents=True, exist_ok=True)
-            self._ensure_directory_permissions(session_path)
+            working_dir.mkdir(parents=True, exist_ok=True)
+            self._ensure_directory_permissions(working_dir)
+            
+            # Initialize git repo in working directory - MANDATORY for OpenCode project ID consistency
+            await self._initialize_git_repo_for_app(working_dir, configuration.app_url)
+            
+            # Verify git initialization succeeded by getting the project ID
+            git_project_id = await self._get_git_project_id(working_dir)
+            if not git_project_id:
+                raise Exception(f"Failed to initialize git repository in {working_dir}. Git initialization is required for OpenCode session management.")
+            
+            logger.info(f"Created task working directory with git project ID: {git_project_id}")
         except (OSError, PermissionError) as e:
-            self._handle_file_operation_error("create session directory", session_path, e)
+            self._handle_file_operation_error("create task working directory", working_dir, e)
+        except Exception as e:
+            # Re-raise git initialization errors
+            raise Exception(f"Task creation failed: {str(e)}")
         
         return task
     
@@ -226,7 +237,6 @@ class AgentService:
             
             if settings.opencode_config_path.exists():
                 self._safe_copy_file(settings.opencode_config_path, session_config_path)
-                logger.debug(f"Copied config to session: {session_config_path}")
             else:
                 logger.warning(f"OpenCode config not found at {settings.opencode_config_path}")
             
@@ -237,41 +247,48 @@ class AgentService:
             if project_opencode_dir.exists():
                 # Copy the entire .opencode directory structure with proper permissions
                 self._safe_copy_tree(project_opencode_dir, session_opencode_dir)
-                logger.debug(f"Copied .opencode directory to session: {session_opencode_dir}")
             else:
                 logger.info(f"No .opencode directory found at {settings.opencode_dir} - using OpenCode defaults")
             
         except Exception as e:
             raise Exception(f"Failed to create session configuration: {str(e)}")
 
+    def _detect_opencode_storage_path(self) -> Path:
+        """Dynamically detect the correct OpenCode storage path for the current environment"""
+        # Use standard home directory path for OpenCode storage
+        opencode_storage_path = Path.home() / ".local" / "share" / "opencode" / "storage"
+        
+        # Create directory if it doesn't exist
+        if not opencode_storage_path.exists():
+            logger.info(f"Creating OpenCode storage at: {opencode_storage_path}")
+            try:
+                opencode_storage_path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to create OpenCode storage: {e}")
+                raise Exception(f"Could not create OpenCode storage directory at {opencode_storage_path}")
+        else:
+            logger.info(f"Found OpenCode storage at: {opencode_storage_path}")
+        
+        return opencode_storage_path
+
     async def _create_opencode_session(self, session_id: str, working_dir: Path, app_url: str):
-        """Pre-create OpenCode session directory structure using app-based project isolation"""
+        """Pre-create OpenCode session directory structure using git-based project ID like OpenCode"""
         import time
         import json
-        import os
         
         try:
-            # Use app hash as project ID to isolate sessions per target application
-            project_id = self._get_app_project_id(app_url)
-            logger.info(f"Creating session for project_id: {project_id} (app: {app_url})")
+            # Get project ID from git repository (REQUIRED - no fallbacks)
+            git_project_id = await self._get_git_project_id(working_dir)
             
-            # OpenCode session storage path - check both Linux and Windows locations
-            # First try Windows user directory (when running in WSL)
-            windows_opencode_storage = Path("/mnt/c/users") / os.getenv("USER", "user") / ".local" / "share" / "opencode" / "storage"
-            linux_opencode_storage = Path.home() / ".local" / "share" / "opencode" / "storage"
+            if not git_project_id:
+                raise Exception(f"No git project ID found in {working_dir}. Git repository must be properly initialized.")
             
-            # Use Windows path if it exists, otherwise fall back to Linux path
-            if windows_opencode_storage.exists():
-                opencode_storage = windows_opencode_storage
-                logger.info(f"Using Windows OpenCode storage path: {opencode_storage}")
-            elif linux_opencode_storage.exists():
-                opencode_storage = linux_opencode_storage
-                logger.info(f"Using Linux OpenCode storage path: {opencode_storage}")
-            else:
-                logger.error(f"OpenCode storage directory not found in either location:")
-                logger.error(f"  Windows: {windows_opencode_storage}")
-                logger.error(f"  Linux: {linux_opencode_storage}")
-                raise Exception(f"OpenCode storage directory not found")
+            project_id = git_project_id
+            logger.info(f"Using git project ID: {project_id} (from {working_dir})")
+            
+            # Dynamically detect OpenCode storage location
+            opencode_storage = self._detect_opencode_storage_path()
+            logger.info(f"Using OpenCode storage path: {opencode_storage}")
             
             # Create session directory structure
             session_base_dir = opencode_storage / "session"
@@ -279,10 +296,10 @@ class AgentService:
             
             logger.info(f"Creating session directory: {project_session_dir}")
             
-            # Create directories with explicit error handling
+            # Create directories with explicit error handling (if not already created by task creation)
             try:
                 project_session_dir.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Successfully created session directory: {project_session_dir}")
+                logger.info(f"Successfully ensured session directory exists: {project_session_dir}")
             except PermissionError as e:
                 logger.error(f"Permission denied creating session directory: {e}")
                 raise Exception(f"Permission denied creating session directory: {project_session_dir}")
@@ -290,7 +307,7 @@ class AgentService:
                 logger.error(f"Failed to create session directory: {e}")
                 raise Exception(f"Failed to create session directory: {project_session_dir} - {e}")
             
-            # Verify directory was created
+            # Verify directory exists
             if not project_session_dir.exists():
                 logger.error(f"Session directory was not created: {project_session_dir}")
                 raise Exception(f"Session directory creation failed: {project_session_dir}")
@@ -309,7 +326,7 @@ class AgentService:
                 }
             }
             
-            # Write session file
+            # Write session file directly in the project session directory (OpenCode expects it here)
             session_file = project_session_dir / f"{session_id}.json"
             
             # Check if session already exists
@@ -342,10 +359,121 @@ class AgentService:
             raise
 
     def _get_app_project_id(self, app_url: str) -> str:
-        """Generate project ID based on app URL for proper session isolation"""
+        """Generate consistent project ID based on app URL for proper session isolation"""
         normalized_url = app_url.lower().strip().rstrip('/')
         app_hash = hashlib.sha1(normalized_url.encode()).hexdigest()[:APP_HASH_LENGTH]
         return f"app-{app_hash}"
+
+    async def _get_git_project_id(self, directory: Path) -> Optional[str]:
+        """Get project ID from git repository like OpenCode does"""
+        try:
+            if not (directory / ".git").exists():
+                return None
+                
+            result = await asyncio.create_subprocess_exec(
+                "git", "rev-list", "--max-parents=0", "--all",
+                cwd=directory,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            
+            if result.returncode == 0 and stdout.strip():
+                commit_hashes = [h.strip() for h in stdout.decode().strip().split('\n') if h.strip()]
+                if commit_hashes:
+                    # Use the first commit hash (sorted) as OpenCode does
+                    return sorted(commit_hashes)[0]
+            return None
+        except Exception as e:
+            logger.debug(f"Failed to get git project ID from {directory}: {e}")
+            return None
+
+    async def _initialize_git_repo_for_app(self, directory: Path, app_url: str) -> None:
+        """Initialize git repository with consistent commit hash based on app URL - MUST succeed"""
+        try:
+            # Check if already a git repo
+            if (directory / ".git").exists():
+                logger.info(f"Git repository already exists in {directory}")
+                return
+            
+            # Initialize git repo
+            result = await asyncio.create_subprocess_exec(
+                "git", "init",
+                cwd=directory,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            
+            if result.returncode != 0:
+                raise Exception(f"Git init failed: {stderr.decode().strip()}")
+            
+            # Create a dummy file for the initial commit
+            dummy_file = directory / ".gitkeep"
+            dummy_file.write_text(f"Project for: {app_url}\n")
+            
+            # Add and commit with consistent message and deterministic timestamp
+            normalized_url = app_url.lower().strip().rstrip('/')
+            commit_message = f"Initial commit for {normalized_url}"
+            
+            # Use a deterministic timestamp based on the app URL for consistent commit hashes
+            app_hash = hashlib.sha1(normalized_url.encode()).hexdigest()
+            # Convert hash to a deterministic timestamp (epoch + hash-based offset)
+            hash_int = int(app_hash[:8], 16)  # Use first 8 chars of hash as int
+            deterministic_timestamp = 1640995200 + (hash_int % 86400)  # Jan 1, 2022 + hash-based offset within a day
+            commit_date = str(deterministic_timestamp)
+            
+            # Set git config for this repo
+            result = await asyncio.create_subprocess_exec(
+                "git", "config", "user.name", "OpenCode Agent",
+                cwd=directory,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await result.communicate()
+            if result.returncode != 0:
+                raise Exception("Failed to set git user.name")
+            
+            result = await asyncio.create_subprocess_exec(
+                "git", "config", "user.email", "agent@opencode.local",
+                cwd=directory,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await result.communicate()
+            if result.returncode != 0:
+                raise Exception("Failed to set git user.email")
+            
+            # Add file
+            result = await asyncio.create_subprocess_exec(
+                "git", "add", ".gitkeep",
+                cwd=directory,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            if result.returncode != 0:
+                raise Exception(f"Git add failed: {stderr.decode().strip()}")
+            
+            # Commit with deterministic timestamp for consistent hash
+            env = {**os.environ, "GIT_AUTHOR_DATE": commit_date, "GIT_COMMITTER_DATE": commit_date}
+            result = await asyncio.create_subprocess_exec(
+                "git", "commit", "-m", commit_message,
+                cwd=directory,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await result.communicate()
+            
+            if result.returncode != 0:
+                raise Exception(f"Git commit failed: {stderr.decode().strip()}")
+                
+            logger.info(f"Successfully initialized git repo for app {app_url} in {directory}")
+                
+        except Exception as e:
+            logger.error(f"Git initialization failed for {app_url}: {e}")
+            raise Exception(f"Git repository initialization failed: {str(e)}")
 
     def _should_use_session_continuation(self, task_type: TaskType) -> bool:
         """Determine if task type should use session continuation"""
@@ -474,17 +602,51 @@ class AgentService:
                     env=env
                 )
                 
-                # Wait for completion with timeout and capture output
+                # Stream output in real-time
+                stdout_lines = []
+                stderr_lines = []
+                
+                async def stream_stdout():
+                    """Stream stdout in real-time"""
+                    while True:
+                        line = await process.stdout.readline()
+                        if not line:
+                            break
+                        line_text = line.decode('utf-8', errors='replace').rstrip()
+                        if line_text:
+                            stdout_lines.append(line_text)
+                            await self._send_debug(task.id, f"[STDOUT] {line_text}", agent=primary_agent)
+                
+                async def stream_stderr():
+                    """Stream stderr in real-time"""
+                    while True:
+                        line = await process.stderr.readline()
+                        if not line:
+                            break
+                        line_text = line.decode('utf-8', errors='replace').rstrip()
+                        if line_text:
+                            stderr_lines.append(line_text)
+                            await self._send_debug(task.id, f"[STDERR] {line_text}", agent=primary_agent)
+                
+                # Wait for completion with timeout and stream output
                 try:
-                    stdout_data, stderr_data = await asyncio.wait_for(
-                        process.communicate(),
+                    # Start streaming tasks
+                    stdout_task = asyncio.create_task(stream_stdout())
+                    stderr_task = asyncio.create_task(stream_stderr())
+                    
+                    # Wait for process completion with timeout
+                    returncode = await asyncio.wait_for(
+                        process.wait(),
                         timeout=OPENCODE_TIMEOUT_SECONDS
                     )
-                    returncode = process.returncode
                     
-                    # Decode output safely
-                    stdout = stdout_data.decode('utf-8', errors='replace').strip() if stdout_data else ""
-                    stderr = stderr_data.decode('utf-8', errors='replace').strip() if stderr_data else ""
+                    # Ensure all output is captured
+                    await stdout_task
+                    await stderr_task
+                    
+                    # Join lines for final output
+                    stdout = '\n'.join(stdout_lines)
+                    stderr = '\n'.join(stderr_lines)
                     
                 except asyncio.TimeoutError:
                     await self._send_debug(task.id, "OpenCode process timed out, terminating...", "ERROR", agent=primary_agent)
@@ -495,15 +657,12 @@ class AgentService:
                         process.kill()
                         await process.wait()
                     returncode = -1
-                    stdout = stderr = ""
+                    stdout = '\n'.join(stdout_lines)
+                    stderr = '\n'.join(stderr_lines)
                 
                 await self._send_debug(task.id, f"OpenCode completed with exit code: {returncode}", agent=primary_agent)
                 
-                # Log output for debugging
-                if stdout:
-                    await self._send_debug(task.id, f"OpenCode STDOUT: {stdout[:1000]}{'...' if len(stdout) > 1000 else ''}", agent=primary_agent)
-                if stderr:
-                    await self._send_debug(task.id, f"OpenCode STDERR: {stderr[:1000]}{'...' if len(stderr) > 1000 else ''}", agent=primary_agent)
+                # Note: Output is already streamed in real-time above, no need to log it again here
                 
             except Exception as e:
                 await self._send_debug(task.id, f"Failed to execute OpenCode: {e}", "ERROR", agent=primary_agent)
