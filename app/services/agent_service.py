@@ -771,39 +771,124 @@ class AgentService:
             error_msg += f"Session path: {session_path if 'session_path' in locals() else 'Not created'}"
             return False, error_msg
     
-    async def get_session_files(self, task_id: str) -> List[SessionFile]:
-        """Get list of files in task session"""
-        task = self.tasks.get(task_id)
-        if not task:
-            return []
+    async def cleanup_all_sessions(self) -> Tuple[int, int, bool, Dict[str, List[str]]]:
+        """Clean up all sessions, tasks, and OpenCode storage with verification
         
-        session_path = Path(task.session_path)
-        if not session_path.exists():
-            return []
+        Returns:
+            Tuple of (deleted_sessions_count, deleted_tasks_count, deleted_opencode_storage, failures)
+            failures dict contains 'session_failures', 'app_failures', 'opencode_failure'
+        """
+        deleted_sessions = 0
+        deleted_tasks = len(self.tasks)
+        deleted_opencode_storage = False
         
-        files = []
         try:
-            for file_path in session_path.rglob("*"):
-                try:
-                    if file_path.is_file():
-                        stat = file_path.stat()
-                        relative_path = file_path.relative_to(session_path)
+            # First, cancel and shutdown all running processes
+            await self.shutdown_all_processes()
+            
+            # Clear all in-memory tasks
+            self.tasks.clear()
+            self._task_locks.clear()
+            
+            # Delete all session directories from our storage with verification
+            session_root = settings.session_root
+            failed_session_deletions = []
+            failed_app_deletions = []
+            
+            if session_root.exists():
+                for app_dir in session_root.glob("app-*"):
+                    if app_dir.is_dir():
+                        for session_dir in app_dir.iterdir():
+                            if session_dir.is_dir():
+                                session_path_str = str(session_dir)
+                                try:
+                                    shutil.rmtree(session_dir)
+                                    # Verify deletion was successful
+                                    if session_dir.exists():
+                                        failed_session_deletions.append(session_path_str)
+                                        logger.error(f"Session directory still exists after deletion: {session_dir}")
+                                    else:
+                                        deleted_sessions += 1
+                                        logger.info(f"Verified deletion of session directory: {session_dir}")
+                                except Exception as e:
+                                    failed_session_deletions.append(session_path_str)
+                                    logger.error(f"Failed to delete session {session_dir}: {e}")
                         
-                        files.append(SessionFile(
-                            name=file_path.name,
-                            path=str(relative_path),
-                            size=stat.st_size,
-                            modified=datetime.fromtimestamp(stat.st_mtime),
-                            type="file"
-                        ))
-                except (OSError, PermissionError) as e:
-                    # Skip files we can't access (common on Linux with permission restrictions)
-                    logger.debug(f"Skipping file due to access error: {file_path} - {e}")
-                    continue
-        except (OSError, PermissionError) as e:
-            logger.error(f"Error listing session files in {session_path}: {e}")
-        
-        return files
+                        # Remove empty app directory with verification
+                        try:
+                            if not any(app_dir.iterdir()):
+                                app_path_str = str(app_dir)
+                                app_dir.rmdir()
+                                # Verify app directory deletion
+                                if app_dir.exists():
+                                    failed_app_deletions.append(app_path_str)
+                                    logger.error(f"App directory still exists after deletion: {app_dir}")
+                                else:
+                                    logger.info(f"Verified deletion of empty app directory: {app_dir}")
+                            else:
+                                logger.info(f"App directory not empty, keeping: {app_dir}")
+                        except Exception as e:
+                            failed_app_deletions.append(str(app_dir))
+                            logger.error(f"Failed to delete app directory {app_dir}: {e}")
+            
+            # Log summary of failed deletions
+            if failed_session_deletions:
+                logger.error(f"Failed to delete {len(failed_session_deletions)} session directories: {failed_session_deletions}")
+            if failed_app_deletions:
+                logger.error(f"Failed to delete {len(failed_app_deletions)} app directories: {failed_app_deletions}")
+            
+            # Delete entire OpenCode storage - complete cleanup with verification
+            opencode_deletion_failed = False
+            try:
+                opencode_storage = self._detect_opencode_storage_path()
+                if opencode_storage.exists():
+                    opencode_path_str = str(opencode_storage)
+                    logger.info(f"Attempting to delete entire OpenCode storage: {opencode_storage}")
+                    
+                    # Delete the entire OpenCode storage directory
+                    # This removes sessions, auth tokens, extensions, settings - everything
+                    shutil.rmtree(opencode_storage)
+                    
+                    # Verify OpenCode storage deletion was successful
+                    if opencode_storage.exists():
+                        opencode_deletion_failed = True
+                        deleted_opencode_storage = False
+                        logger.error(f"OpenCode storage still exists after deletion attempt: {opencode_storage}")
+                    else:
+                        deleted_opencode_storage = True
+                        logger.info(f"Verified deletion of entire OpenCode storage: {opencode_storage}")
+                        logger.info("Complete OpenCode cleanup verified - auth, extensions, settings all removed")
+                else:
+                    logger.info("No OpenCode storage found to delete")
+                    deleted_opencode_storage = False
+            except Exception as e:
+                opencode_deletion_failed = True
+                deleted_opencode_storage = False
+                logger.error(f"Failed to delete OpenCode storage: {e}")
+                # Don't fail the entire cleanup if OpenCode storage cleanup fails
+            
+            # Compile failure information
+            failures = {
+                'session_failures': failed_session_deletions,
+                'app_failures': failed_app_deletions,
+                'opencode_failure': opencode_deletion_failed
+            }
+            
+            # Log comprehensive cleanup summary
+            total_failures = len(failed_session_deletions) + len(failed_app_deletions) + (1 if opencode_deletion_failed else 0)
+            logger.info(f"Cleanup completed: {deleted_sessions} sessions, {deleted_tasks} tasks, OpenCode storage: {deleted_opencode_storage}")
+            
+            if total_failures > 0:
+                logger.warning(f"Cleanup had {total_failures} failures - see failure details in response")
+            else:
+                logger.info("All cleanup operations completed successfully with verification")
+            
+            return deleted_sessions, deleted_tasks, deleted_opencode_storage, failures
+            
+        except Exception as e:
+            logger.error(f"Cleanup failed: {e}")
+            raise Exception(f"Cleanup operation failed: {str(e)}")
+
 
 
 # Global service instance

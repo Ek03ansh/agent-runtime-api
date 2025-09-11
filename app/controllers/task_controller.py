@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from app.core.config import settings
 from app.models import (
     HealthResponse, SessionFile, Task, TaskResponse, TaskListResponse, TaskLogsResponse, 
-    TaskRequest, TaskStatus
+    TaskRequest, TaskStatus, CleanupResponse, CleanupFailures, SessionListResponse, SessionFilesResponse
 )
 from app.services.agent_service import agent_service
 from app.services.websocket_manager import websocket_manager
@@ -24,7 +24,8 @@ router = APIRouter(tags=["tasks"])
 logger = logging.getLogger(__name__)
 
 # Constants
-EXCLUDED_DIRS = {'node_modules', '.git', '__pycache__', '.vscode', '.idea'}
+EXCLUDED_DIRS = {'node_modules', '.git', '__pycache__', '.vscode', '.idea', '.opencode'}
+EXCLUDED_FILES = {'opencode.json', '.gitkeep'}
 TEXT_FILE_ENCODING = 'utf-8'
 
 def find_session_path(session_id: str) -> Optional[Path]:
@@ -42,7 +43,15 @@ def find_session_path(session_id: str) -> Optional[Path]:
 
 def should_exclude_path(file_path: Path) -> bool:
     """Check if path should be excluded from processing"""
-    return any(excluded in file_path.parts for excluded in EXCLUDED_DIRS)
+    # Check if any excluded directory is in the path
+    if any(excluded in file_path.parts for excluded in EXCLUDED_DIRS):
+        return True
+    
+    # Check if the file name itself should be excluded
+    if file_path.name in EXCLUDED_FILES:
+        return True
+    
+    return False
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(
@@ -170,9 +179,60 @@ async def cancel_task(task_id: str) -> TaskResponse:
     task = await agent_service.get_task(task_id)
     return TaskResponse.from_task(task)
 
+@router.delete("/cleanup/all", response_model=CleanupResponse, status_code=200)
+async def cleanup_all_sessions() -> CleanupResponse:
+    """Delete all sessions, tasks, and associated storage (development/maintenance endpoint)"""
+    try:
+        # Get count before cleanup for response
+        session_root = settings.session_root
+        session_count = 0
+        
+        # Count sessions
+        for app_dir in session_root.glob("app-*"):
+            if app_dir.is_dir():
+                for session_dir in app_dir.iterdir():
+                    if session_dir.is_dir():
+                        session_count += 1
+        
+        # Clean up via agent service with verification
+        deleted_sessions, deleted_tasks, deleted_opencode_storage, failures = await agent_service.cleanup_all_sessions()
+        
+        # Determine if cleanup was fully successful
+        has_failures = (len(failures['session_failures']) > 0 or 
+                       len(failures['app_failures']) > 0 or 
+                       failures['opencode_failure'])
+        
+        success_message = "All sessions and storage cleaned up successfully"
+        if has_failures:
+            success_message = "Cleanup completed with some failures - see details below"
+        
+        # Create failure details if any occurred
+        failure_details = None
+        if has_failures:
+            failure_details = CleanupFailures(
+                failed_session_deletions=failures['session_failures'],
+                failed_app_deletions=failures['app_failures'], 
+                opencode_deletion_failed=failures['opencode_failure'],
+                total_failures=len(failures['session_failures']) + len(failures['app_failures']) + (1 if failures['opencode_failure'] else 0)
+            )
+        
+        return CleanupResponse(
+            message=success_message,
+            deleted_sessions=deleted_sessions,
+            deleted_tasks=deleted_tasks, 
+            deleted_opencode_storage=deleted_opencode_storage,
+            total_session_directories=session_count,
+            success=not has_failures,
+            failures=failure_details
+        )
+        
+    except Exception as e:
+        logger.error(f"Cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
+
 # Session management endpoints
-@router.get("/sessions", response_model=List[str])
-async def get_sessions() -> List[str]:
+@router.get("/sessions", response_model=SessionListResponse)
+async def get_sessions() -> SessionListResponse:
     """Get list of all available sessions"""
     sessions = set()
     session_root = settings.session_root
@@ -185,40 +245,46 @@ async def get_sessions() -> List[str]:
                 if session_dir.is_dir():
                     sessions.add(session_dir.name)
     
-    return sorted(list(sessions))
+    session_list = sorted(list(sessions))
+    return SessionListResponse(
+        sessions=session_list,
+        total_sessions=len(session_list)
+    )
 
-@router.get("/sessions/{session_id}/files", response_model=List[SessionFile])
-async def get_session_files(session_id: str) -> List[SessionFile]:
-    """Get files in session by session ID - delegates to agent service"""
-    # Use existing agent_service method to avoid duplication
+@router.get("/sessions/{session_id}/files", response_model=SessionFilesResponse)
+async def get_session_files(session_id: str) -> SessionFilesResponse:
+    """Get files in session by session ID"""
     session_path = find_session_path(session_id)
     if not session_path:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Find a task with this session path to reuse agent_service logic
-    for task in (await agent_service.get_all_tasks()):
-        if Path(task.session_path).name == session_id:
-            return await agent_service.get_session_files(task.id)
-    
-    # Fallback to manual file listing if no task found
     files = []
-    for file_path in session_path.rglob("*"):
-        if file_path.is_file() and not should_exclude_path(file_path):
-            try:
-                stat = file_path.stat()
-                relative_path = file_path.relative_to(session_path)
-                
-                files.append(SessionFile(
-                    name=file_path.name,
-                    path=str(relative_path),
-                    size=stat.st_size,
-                    modified=datetime.fromtimestamp(stat.st_mtime),
-                    type="file"
-                ))
-            except (OSError, PermissionError):
-                continue
+    try:
+        for file_path in session_path.rglob("*"):
+            if file_path.is_file() and not should_exclude_path(file_path):
+                try:
+                    stat = file_path.stat()
+                    relative_path = file_path.relative_to(session_path)
+                    
+                    files.append(SessionFile(
+                        name=file_path.name,
+                        path=str(relative_path),
+                        size=stat.st_size,
+                        modified=datetime.fromtimestamp(stat.st_mtime),
+                        type="file"
+                    ))
+                except (OSError, PermissionError):
+                    # Skip files we can't access
+                    logger.debug(f"Skipping file due to access error: {file_path}")
+                    continue
+    except (OSError, PermissionError) as e:
+        logger.error(f"Error listing session files in {session_path}: {e}")
     
-    return files
+    return SessionFilesResponse(
+        files=files,
+        total_files=len(files),
+        session_id=session_id
+    )
 
 @router.get("/sessions/{session_id}/files/{file_path:path}")
 async def download_session_file(session_id: str, file_path: str):

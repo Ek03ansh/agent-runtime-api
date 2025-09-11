@@ -123,3 +123,29 @@ class AuthLoginResponse(BaseModel):
 
 class AuthStatusResponse(BaseModel):
     authenticated: bool = Field(..., description="Whether user is authenticated")
+
+# Cleanup API Models
+class CleanupFailures(BaseModel):
+    failed_session_deletions: List[str] = Field(..., description="Paths of sessions that failed to delete")
+    failed_app_deletions: List[str] = Field(..., description="Paths of app directories that failed to delete")
+    opencode_deletion_failed: bool = Field(..., description="Whether OpenCode storage deletion failed")
+    total_failures: int = Field(..., description="Total number of failures")
+
+class CleanupResponse(BaseModel):
+    message: str = Field(..., description="Cleanup result message")
+    deleted_sessions: int = Field(..., description="Number of sessions successfully deleted")
+    deleted_tasks: int = Field(..., description="Number of in-memory tasks cleared")
+    deleted_opencode_storage: bool = Field(..., description="Whether OpenCode storage was deleted")
+    total_session_directories: int = Field(..., description="Total session directories found before cleanup")
+    success: bool = Field(..., description="Whether cleanup completed without failures")
+    failures: Optional[CleanupFailures] = Field(default=None, description="Failure details if any occurred")
+
+# Session API Models
+class SessionListResponse(BaseModel):
+    sessions: List[str] = Field(..., description="List of available session IDs")
+    total_sessions: int = Field(..., description="Total number of sessions")
+
+class SessionFilesResponse(BaseModel):
+    files: List[SessionFile] = Field(..., description="List of files in the session")
+    total_files: int = Field(..., description="Total number of files")
+    session_id: str = Field(..., description="Session identifier")
