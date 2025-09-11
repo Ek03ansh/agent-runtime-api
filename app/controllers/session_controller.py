@@ -1,0 +1,173 @@
+import logging
+import mimetypes
+import tempfile
+import zipfile
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse, PlainTextResponse
+
+from app.core.config import settings
+from app.models import SessionFile, SessionListResponse, SessionFilesResponse
+
+router = APIRouter(tags=["sessions"])
+logger = logging.getLogger(__name__)
+
+# Constants
+EXCLUDED_DIRS = {'node_modules', '.git', '__pycache__', '.vscode', '.idea', '.opencode'}
+EXCLUDED_FILES = {'opencode.json', '.gitkeep'}
+TEXT_FILE_ENCODING = 'utf-8'
+
+def find_session_path(session_id: str) -> Optional[Path]:
+    """Find session path across all app directories"""
+    session_root = settings.session_root
+    
+    # Search for session across all app directories
+    for app_dir in session_root.glob("app-*"):
+        if app_dir.is_dir():
+            potential_path = app_dir / session_id
+            if potential_path.exists() and potential_path.is_dir():
+                return potential_path
+    
+    return None
+
+def should_exclude_path(file_path: Path) -> bool:
+    """Check if path should be excluded from processing"""
+    # Check if any excluded directory is in the path
+    if any(excluded in file_path.parts for excluded in EXCLUDED_DIRS):
+        return True
+    
+    # Check if the file name itself should be excluded
+    if file_path.name in EXCLUDED_FILES:
+        return True
+    
+    return False
+
+@router.get("/sessions", response_model=SessionListResponse)
+async def get_sessions() -> SessionListResponse:
+    """Get list of all available sessions"""
+    sessions = set()
+    session_root = settings.session_root
+    
+    # Search for sessions across all app directories
+    for app_dir in session_root.glob("app-*"):
+        if app_dir.is_dir():
+            # Each subdirectory in app-* is a session
+            for session_dir in app_dir.iterdir():
+                if session_dir.is_dir():
+                    sessions.add(session_dir.name)
+    
+    session_list = sorted(list(sessions))
+    return SessionListResponse(
+        sessions=session_list,
+        total_sessions=len(session_list)
+    )
+
+@router.get("/sessions/{session_id}/files", response_model=SessionFilesResponse)
+async def get_session_files(session_id: str) -> SessionFilesResponse:
+    """Get files in session by session ID"""
+    session_path = find_session_path(session_id)
+    if not session_path:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    files = []
+    try:
+        for file_path in session_path.rglob("*"):
+            if file_path.is_file() and not should_exclude_path(file_path):
+                try:
+                    stat = file_path.stat()
+                    relative_path = file_path.relative_to(session_path)
+                    
+                    files.append(SessionFile(
+                        name=file_path.name,
+                        path=str(relative_path),
+                        size=stat.st_size,
+                        modified=datetime.fromtimestamp(stat.st_mtime),
+                        type="file"
+                    ))
+                except (OSError, PermissionError):
+                    # Skip files we can't access
+                    logger.debug(f"Skipping file due to access error: {file_path}")
+                    continue
+    except (OSError, PermissionError) as e:
+        logger.error(f"Error listing session files in {session_path}: {e}")
+    
+    return SessionFilesResponse(
+        files=files,
+        total_files=len(files),
+        session_id=session_id
+    )
+
+@router.get("/sessions/{session_id}/files/{file_path:path}")
+async def download_session_file(session_id: str, file_path: str):
+    """Download a specific file from session"""
+    session_path = find_session_path(session_id)
+    if not session_path:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    full_file_path = session_path / file_path
+    
+    # Security check: ensure file is within session directory
+    try:
+        full_file_path.resolve().relative_to(session_path.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: file outside session directory")
+    
+    if not full_file_path.exists() or not full_file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Determine content type
+    content_type, _ = mimetypes.guess_type(str(full_file_path))
+    
+    # For text files, return as plain text to display in browser
+    if content_type and content_type.startswith('text/'):
+        try:
+            with open(full_file_path, 'r', encoding=TEXT_FILE_ENCODING) as f:
+                content = f.read()
+            return PlainTextResponse(content=content, media_type=content_type)
+        except (UnicodeDecodeError, PermissionError):
+            pass  # Fall back to file download
+    
+    return FileResponse(
+        path=str(full_file_path),
+        filename=full_file_path.name,
+        media_type=content_type or 'application/octet-stream'
+    )
+
+@router.get("/sessions/{session_id}/download")
+async def download_session_zip(session_id: str):
+    """Download complete session folder as ZIP file"""
+    session_path = find_session_path(session_id)
+    if not session_path:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Create temporary ZIP file
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    zip_path = temp_zip.name
+    temp_zip.close()
+    
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in session_path.rglob("*"):
+                if file_path.is_file() and not should_exclude_path(file_path):
+                    try:
+                        relative_path = file_path.relative_to(session_path)
+                        zipf.write(file_path, relative_path)
+                    except (OSError, PermissionError):
+                        continue
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"session_{session_id}_{timestamp}.zip"
+        
+        return FileResponse(
+            path=zip_path,
+            filename=filename,
+            media_type='application/zip'
+        )
+        
+    except Exception as e:
+        Path(zip_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create ZIP: {str(e)}")

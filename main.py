@@ -16,6 +16,7 @@ import logging
 from app.core.config import settings
 from app.controllers.task_controller import router as task_router
 from app.controllers.auth_controller import router as auth_router
+from app.controllers.session_controller import router as session_router
 from app.utils.helpers import ensure_directory_exists
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ app.add_middleware(
 # Include routers
 app.include_router(task_router)
 app.include_router(auth_router)
+app.include_router(session_router)
 
 
 @app.get("/")
