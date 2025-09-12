@@ -37,11 +37,21 @@ class AzureStorageService:
                 blob_name = file_path.name
             
             # Create blob client using the SAS URL
-            # We need to append the blob name to the container SAS URL
-            if sas_url.endswith('/'):
-                full_blob_url = f"{sas_url}{blob_name}"
+            # We need to insert the blob name between the container path and query parameters
+            if '?' in sas_url:
+                # Split the URL at the query parameters
+                base_url, query_params = sas_url.split('?', 1)
+                # Ensure base_url ends with container name and add blob name
+                if base_url.endswith('/'):
+                    full_blob_url = f"{base_url}{blob_name}?{query_params}"
+                else:
+                    full_blob_url = f"{base_url}/{blob_name}?{query_params}"
             else:
-                full_blob_url = f"{sas_url}/{blob_name}"
+                # No query parameters, simple append
+                if sas_url.endswith('/'):
+                    full_blob_url = f"{sas_url}{blob_name}"
+                else:
+                    full_blob_url = f"{sas_url}/{blob_name}"
             
             logger.info(f"Uploading {file_path} to Azure Blob Storage: {blob_name}")
             
