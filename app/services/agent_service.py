@@ -292,6 +292,29 @@ class AgentService:
             task.updated_at = datetime.now()
             return False
     
+    async def _append_workflow_status_instructions(self, task_id: str, instructions: str) -> str:
+        """Append workflow status tracking instructions to the main instructions"""
+        workflow_status_prompt_path = ".opencode/prompts/workflow-status-tracking.md"
+        try:
+            with open(workflow_status_prompt_path, 'r', encoding='utf-8') as f:
+                workflow_status_instructions = f.read()
+            
+            # Append workflow tracking instructions to the main instructions
+            if instructions:
+                enhanced_instructions = f"{instructions}\n\n---\n\n{workflow_status_instructions}"
+            else:
+                enhanced_instructions = workflow_status_instructions
+                
+            await self._send_debug(task_id, "Added workflow status tracking instructions to agent prompt")
+            return enhanced_instructions
+                
+        except FileNotFoundError:
+            await self._send_debug(task_id, f"Warning: Workflow status tracking prompt not found at {workflow_status_prompt_path}", "WARNING")
+            return instructions
+        except Exception as e:
+            await self._send_debug(task_id, f"Warning: Failed to load workflow status tracking prompt: {e}", "WARNING")
+            return instructions
+
     async def _create_opencode_config(self, task: Task):
         """Create session directory and copy essential OpenCode configuration"""
         try:
@@ -622,6 +645,9 @@ class AgentService:
                 # Add custom instructions if provided
                 if task.configuration.instructions:
                     instructions = f"{task.configuration.instructions}\n\n{instructions}"
+            
+            # Append workflow status tracking instructions for all task types
+            instructions = await self._append_workflow_status_instructions(task.id, instructions)
             
             # Build command with hardcoded GitHub Copilot configuration
             model_identifier = f"{settings.provider}/{settings.model}"  # github-copilot/claude-sonnet-4
