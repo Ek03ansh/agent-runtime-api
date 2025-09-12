@@ -462,9 +462,21 @@ if __name__ == "__main__":
         if command in command_map:
             command_map[command]()
         elif command == 'create':
-            task_type = sys.argv[2] if len(sys.argv) > 2 else 'complete'
-            session_id = sys.argv[3] if len(sys.argv) > 3 else None
-            app_url = sys.argv[4] if len(sys.argv) > 4 else None
+            # Filter out --endpoint arguments to get clean positional args
+            filtered_args = []
+            skip_next = False
+            for i, arg in enumerate(sys.argv[2:], 2):  # Start from index 2 (after 'create')
+                if skip_next:
+                    skip_next = False
+                    continue
+                if arg == '--endpoint':
+                    skip_next = True  # Skip the next argument (endpoint value)
+                    continue
+                filtered_args.append(arg)
+            
+            task_type = filtered_args[0] if len(filtered_args) > 0 else 'complete'
+            session_id = filtered_args[1] if len(filtered_args) > 1 else None
+            app_url = filtered_args[2] if len(filtered_args) > 2 else None
             
             task_id = create_task(task_type, session_id, app_url)
             if task_id:
