@@ -764,7 +764,7 @@ class AgentService:
                     instructions = f"{task.configuration.instructions}\n\n{instructions}"
             
             # Append workflow status tracking instructions for all task types
-            instructions = await self._append_workflow_status_instructions(task.id, instructions)
+            # instructions = await self._append_workflow_status_instructions(task.id, instructions)
             
             # Build command with hardcoded GitHub Copilot configuration
             model_identifier = f"{settings.provider}/{settings.model}"  # github-copilot/claude-sonnet-4

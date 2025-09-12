@@ -25,12 +25,14 @@ $ENVIRONMENT_NAME = "issacnitinenv"
 $ACR_NAME = "issacnitinacr"
 $ACR_SERVER = "issacnitinacr.azurecr.io"
 $IMAGE_NAME = "agent-runtime"
-$IMAGE_TAG = "latest"
+$TIMESTAMP = Get-Date -Format "yyyyMMdd-HHmmss"
+$IMAGE_TAG = "v$TIMESTAMP"
 $LOCATION = "eastus"
 $SUBSCRIPTION_ID = "acaab7ee-e0fb-43d9-bce9-0e403b60ce06"
 
 Write-Host "🚀 Agent Runtime API - Container Apps Deployment Script" -ForegroundColor Cyan
 Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "🏷️  Image Tag: $IMAGE_TAG" -ForegroundColor Blue
 Write-Host "⏱️  Timeout Settings:" -ForegroundColor Blue
 Write-Host "   Cooldown Period: $CooldownPeriod seconds" -ForegroundColor Gray
 Write-Host "   Session Timeout: $SessionTimeout seconds" -ForegroundColor Gray
@@ -77,8 +79,9 @@ if (-not $SkipBuild) {
 
 # Step 2: Tag for Azure Container Registry
 Write-Host "`n🏷️  Step 2: Tagging image for Azure Container Registry..." -ForegroundColor Yellow
-docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${ACR_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
-Test-LastCommand "Image tagged for ACR"
+docker tag "${IMAGE_NAME}:latest" "${ACR_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+docker tag "${IMAGE_NAME}:latest" "${ACR_SERVER}/${IMAGE_NAME}:latest"
+Test-LastCommand "Image tagged for ACR with timestamp and latest"
 
 # Step 3: Login to Azure Container Registry
 Write-Host "`n🔐 Step 3: Logging into Azure Container Registry..." -ForegroundColor Yellow
@@ -88,7 +91,8 @@ Test-LastCommand "Logged into ACR"
 # Step 4: Push to Azure Container Registry
 Write-Host "`n⬆️  Step 4: Pushing image to Azure Container Registry..." -ForegroundColor Yellow
 docker push "${ACR_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
-Test-LastCommand "Image pushed to ACR"
+docker push "${ACR_SERVER}/${IMAGE_NAME}:latest"
+Test-LastCommand "Images pushed to ACR (timestamped and latest)"
 
 # Step 5: Check if session pool exists
 Write-Host "`n🔍 Step 5: Checking if Container Apps session pool exists..." -ForegroundColor Yellow
@@ -96,7 +100,7 @@ $sessionPoolExists = az containerapp sessionpool show --name $SESSION_POOL_NAME 
 if ($sessionPoolExists) {
     Write-Host "📋 Session pool exists. Updating..." -ForegroundColor Yellow
     
-    # Update existing session pool
+    # Update existing session pool (only image and registry settings)
     az containerapp sessionpool update `
         --name $SESSION_POOL_NAME `
         --resource-group $RESOURCE_GROUP `
@@ -105,9 +109,8 @@ if ($sessionPoolExists) {
         --registry-server $ACR_SERVER `
         --registry-username $ACR_NAME `
         --registry-password $RegistryPassword `
-        --cooldown-period $CooldownPeriod `
-        --session-timeout $SessionTimeout `
-        --idle-timeout $IdleTimeout
+        --target-port 5001 `
+        --cooldown-period $CooldownPeriod
     Test-LastCommand "Session pool updated successfully"
 } else {
     Write-Host "🆕 Session pool doesn't exist. Creating..." -ForegroundColor Yellow
@@ -151,9 +154,11 @@ if ($sessionPoolInfo) {
     Write-Host "   Resource Group: $($sessionPoolInfo.resourceGroup)" -ForegroundColor Gray
     Write-Host "   Location: $($sessionPoolInfo.location)" -ForegroundColor Gray
     Write-Host "   Provisioning State: $($sessionPoolInfo.properties.provisioningState)" -ForegroundColor Gray
-    Write-Host "   Image: $($sessionPoolInfo.properties.containerType.customContainerTemplate.containers[0].image)" -ForegroundColor Gray
-    Write-Host "   CPU: $($sessionPoolInfo.properties.containerType.customContainerTemplate.containers[0].resources.cpu)" -ForegroundColor Gray
-    Write-Host "   Memory: $($sessionPoolInfo.properties.containerType.customContainerTemplate.containers[0].resources.memory)" -ForegroundColor Gray
+    if ($sessionPoolInfo.properties.customContainerTemplate.containers) {
+        Write-Host "   Image: $($sessionPoolInfo.properties.customContainerTemplate.containers[0].image)" -ForegroundColor Gray
+        Write-Host "   CPU: $($sessionPoolInfo.properties.customContainerTemplate.containers[0].resources.cpu)" -ForegroundColor Gray  
+        Write-Host "   Memory: $($sessionPoolInfo.properties.customContainerTemplate.containers[0].resources.memory)" -ForegroundColor Gray
+    }
     Write-Host "   Cooldown Period: $($sessionPoolInfo.properties.dynamicPoolConfiguration.cooldownPeriodInSeconds)s" -ForegroundColor Gray
     Write-Host "   Session Timeout: $($sessionPoolInfo.properties.sessionNetworkConfiguration.sessionTimeout)s" -ForegroundColor Gray
     
