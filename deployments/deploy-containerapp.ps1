@@ -71,7 +71,8 @@ if (-not $RegistryPassword) {
 # Step 1: Build Docker Image (unless skipped)
 if (-not $SkipBuild) {
     Write-Host "`n📦 Step 1: Building Docker image..." -ForegroundColor Yellow
-    docker build -f docker/Dockerfile -t "${IMAGE_NAME}:${IMAGE_TAG}" ..
+    # Build with both timestamped and latest tags (force rebuild with --no-cache)
+    docker build --no-cache -f docker/Dockerfile -t "${IMAGE_NAME}:${IMAGE_TAG}" -t "${IMAGE_NAME}:latest" ..
     Test-LastCommand "Docker image built successfully"
 } else {
     Write-Host "`n⏭️  Step 1: Skipping Docker build" -ForegroundColor Yellow
@@ -79,8 +80,9 @@ if (-not $SkipBuild) {
 
 # Step 2: Tag for Azure Container Registry
 Write-Host "`n🏷️  Step 2: Tagging image for Azure Container Registry..." -ForegroundColor Yellow
-docker tag "${IMAGE_NAME}:latest" "${ACR_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
-docker tag "${IMAGE_NAME}:latest" "${ACR_SERVER}/${IMAGE_NAME}:latest"
+# Tag from the timestamped version we just built, not from latest
+docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${ACR_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${ACR_SERVER}/${IMAGE_NAME}:latest"
 Test-LastCommand "Image tagged for ACR with timestamp and latest"
 
 # Step 3: Login to Azure Container Registry

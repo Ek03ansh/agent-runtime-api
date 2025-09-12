@@ -149,7 +149,7 @@ def test_all_apis():
     print("🎯 API Testing Complete!")
     return True
 
-def create_task(task_type='complete', session_id=None, app_url=None, instructions=''):
+def create_task(task_type='complete', session_id=None, app_url=None, instructions='', include_artifacts=True):
     """Create a task with flexible options"""
     base_url = get_base_url()
     
@@ -168,9 +168,20 @@ def create_task(task_type='complete', session_id=None, app_url=None, instruction
         'session_id': session_id,
         'configuration': {
             'app_url': app_url,
-            'instructions': instructions
+            'instructions': "Just create 1 test in the plan and 1 test file with 1 test  strictly"
         }
     }
+    
+    # Add hardcoded artifacts URL for testing artifact uploads
+    if include_artifacts:
+        # Account-level SAS token with blob service permissions
+        sas_token = "se=2025-09-19&sp=rwdlac&spr=https&sv=2022-11-02&ss=b&srt=co&sig=nunlYhIwWlxPMnC1fIEt5Fv3WxlDgZqcbZ8mllopBBE%3D"
+        artifacts_sas_url = f"https://testingagentstorage.blob.core.windows.net/artifacts?{sas_token}"
+        data['artifacts_url'] = {
+            'sas_url': artifacts_sas_url
+        }
+        print(f'📦 Artifacts will be auto-uploaded to: testingagentstorage/artifacts')
+        print(f'🔑 SAS permissions: rwdlac (read, write, delete, list, add, create)')
     
     print(f'🚀 Creating {task_type} task...')
     print(f'📋 Session ID: {session_id}')
@@ -361,9 +372,14 @@ Task Types:
   generate  - Generate tests only  
   fix       - Fix existing tests only
 
+Artifact Upload:
+  By default, tasks include auto-upload to Azure Storage
+  --no-artifacts   - Disable artifact auto-upload
+
 Examples:
   python test_agent_api.py test
   python test_agent_api.py create complete --endpoint deployed
+  python test_agent_api.py create plan --no-artifacts --endpoint local
   python test_agent_api.py monitor abc123-def456 --endpoint local
   python test_agent_api.py interactive --endpoint deployed
   
@@ -408,8 +424,12 @@ def interactive_mode():
             print("❌ Custom task type requires instructions!")
             return
     
+    # Ask about artifact upload
+    artifacts_choice = input(f"\n📦 Include artifact auto-upload? (Y/n): ").strip().lower()
+    include_artifacts = artifacts_choice not in ['n', 'no']
+    
     # Create task
-    task_id = create_task(task_type, session_id, app_url, instructions)
+    task_id = create_task(task_type, session_id, app_url, instructions, include_artifacts)
     
     if task_id:
         monitor_choice = input("\n👀 Monitor task progress? (y/N): ").strip().lower()
@@ -478,7 +498,10 @@ if __name__ == "__main__":
             session_id = filtered_args[1] if len(filtered_args) > 1 else None
             app_url = filtered_args[2] if len(filtered_args) > 2 else None
             
-            task_id = create_task(task_type, session_id, app_url)
+            # Check for --no-artifacts flag
+            include_artifacts = '--no-artifacts' not in sys.argv
+            
+            task_id = create_task(task_type, session_id, app_url, '', include_artifacts)
             if task_id:
                 print(f'\n🔍 Quick Status Check:')
                 print(f'📊 GET {base_url}/tasks/{task_id}')
@@ -501,8 +524,7 @@ if __name__ == "__main__":
             print(f"❌ Unknown command: {command}")
             show_help()
     else:
-        # Default behavior - create complete task
-        show_endpoint_info()
+        # Default behavior - create complete task with artifacts
         task_id = create_task()
         if task_id:
             monitor_task(task_id)
