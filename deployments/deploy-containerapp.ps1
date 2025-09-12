@@ -55,7 +55,7 @@ if (-not $RegistryPassword) {
 # Step 1: Build Docker Image (unless skipped)
 if (-not $SkipBuild) {
     Write-Host "`n📦 Step 1: Building Docker image..." -ForegroundColor Yellow
-    docker build -f deployments/docker/Dockerfile -t "${IMAGE_NAME}:${IMAGE_TAG}" .
+    docker build -f docker/Dockerfile -t "${IMAGE_NAME}:${IMAGE_TAG}" ..
     Test-LastCommand "Docker image built successfully"
 } else {
     Write-Host "`n⏭️  Step 1: Skipping Docker build" -ForegroundColor Yellow
