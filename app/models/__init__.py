@@ -25,7 +25,6 @@ class SignInDetails(BaseModel):
 
 class ArtifactsUrl(BaseModel):
     sas_url: str = Field(..., description="SAS URL for Azure Storage container with write permissions")
-    expires_at: datetime = Field(..., description="SAS URL expiration timestamp")
 
 class UploadedArtifacts(BaseModel):
     blob_url: str = Field(..., description="Direct URL to the uploaded ZIP file in Azure Storage")
@@ -170,3 +169,7 @@ class SessionFilesResponse(BaseModel):
     files: List[SessionFile] = Field(..., description="List of files in the session")
     total_files: int = Field(..., description="Total number of files")
     session_id: str = Field(..., description="Session identifier")
+
+class UploadRequest(BaseModel):
+    """Request model for manual session upload"""
+    sas_url: str = Field(..., description="Azure Storage SAS URL with write permissions")

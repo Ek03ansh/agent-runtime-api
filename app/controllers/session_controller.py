@@ -6,11 +6,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from fastapi.responses import FileResponse, PlainTextResponse
+from pydantic import BaseModel
 
 from app.core.config import settings
-from app.models import SessionFile, SessionListResponse, SessionFilesResponse
+from app.models import SessionFile, SessionListResponse, SessionFilesResponse, ArtifactsUrl, UploadedArtifacts, UploadRequest
+from app.services.azure_storage_service import AzureStorageService
 
 router = APIRouter(tags=["sessions"])
 logger = logging.getLogger(__name__)
@@ -171,3 +173,70 @@ async def download_session_zip(session_id: str):
     except Exception as e:
         Path(zip_path).unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Failed to create ZIP: {str(e)}")
+
+@router.post("/sessions/{session_id}/upload", response_model=UploadedArtifacts)
+async def upload_session_to_azure(session_id: str, request: UploadRequest) -> UploadedArtifacts:
+    """
+    Manually upload session ZIP to Azure Storage using SAS URL
+    
+    This endpoint allows manual upload of session artifacts independently of task completion.
+    Useful for:
+    - Re-uploading after modifications
+    - Selective session backups  
+    - Testing upload functionality
+    - Manual artifact management
+    """
+    session_path = find_session_path(session_id)
+    if not session_path:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Validate SAS URL format
+    if not AzureStorageService.validate_sas_url(request.sas_url):
+        raise HTTPException(status_code=400, detail="Invalid SAS URL format")
+    
+    # Create temporary ZIP file (reuse existing logic)
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    zip_path = temp_zip.name
+    temp_zip.close()
+    
+    try:
+        # Create ZIP file with session contents
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in session_path.rglob("*"):
+                if file_path.is_file() and not should_exclude_path(file_path):
+                    try:
+                        relative_path = file_path.relative_to(session_path)
+                        zipf.write(file_path, relative_path)
+                    except (OSError, PermissionError):
+                        logger.debug(f"Skipping file due to access error: {file_path}")
+                        continue
+        
+        # Generate blob name with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        blob_name = f"session_{session_id}_{timestamp}.zip"
+        
+        # Upload to Azure Storage
+        zip_file_path = Path(zip_path)
+        blob_url = await AzureStorageService.upload_file_to_sas_url(
+            file_path=zip_file_path,
+            sas_url=request.sas_url,
+            blob_name=blob_name
+        )
+        
+        file_size = zip_file_path.stat().st_size
+        logger.info(f"Successfully uploaded session {session_id} to Azure Storage: {blob_name} ({file_size} bytes)")
+        
+        # Return upload details
+        return UploadedArtifacts(
+            blob_url=blob_url,
+            blob_name=blob_name,
+            uploaded_at=datetime.now(),
+            file_size=file_size
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to upload session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+    finally:
+        # Clean up temporary ZIP file
+        Path(zip_path).unlink(missing_ok=True)

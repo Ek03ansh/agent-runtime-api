@@ -135,11 +135,6 @@ class AgentService:
             return None
             
         try:
-            # Check if SAS URL is expired
-            if task.artifacts_url.expires_at < datetime.now():
-                logger.warning(f"SAS URL expired for task {task.id}, skipping auto-upload")
-                task.error = f"{task.error}\nNote: SAS URL expired, artifacts not uploaded" if task.error else "SAS URL expired, artifacts not uploaded"
-                return None
             
             # Validate SAS URL format
             if not AzureStorageService.validate_sas_url(task.artifacts_url.sas_url):
@@ -845,6 +840,14 @@ class AgentService:
                             await self._send_debug(task.id, "Detected session.idle - OpenCode work completed, terminating process", agent=primary_agent)
                             try:
                                 process.terminate()
+                                
+                                # Auto-upload artifacts if artifacts_url is provided (for both success and failure)
+                                uploaded_artifacts = await self._auto_upload_artifacts(task)
+                                if uploaded_artifacts:
+                                    # Store uploaded artifacts details in separate field (preserving original SAS URL)
+                                    task.uploaded_artifacts = uploaded_artifacts
+                                    logger.info(f"Task {task.id} artifacts uploaded to: {uploaded_artifacts.blob_url}")
+                                
                             except Exception as e:
                                 await self._send_debug(task.id, f"Failed to terminate process: {e}", "WARNING", agent=primary_agent)
             
