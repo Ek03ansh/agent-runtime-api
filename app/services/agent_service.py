@@ -109,6 +109,16 @@ class AgentService:
             await self.websocket_manager.send_debug_message(task_id, level, message, agent)
         except Exception as e:
             logger.warning(f"Failed to send WebSocket message: {e}")
+        
+        # Log with appropriate level
+        if level == "ERROR":
+            logger.error(message)
+        elif level == "WARNING":
+            logger.warning(message)
+        elif level == "INFO":
+            logger.info(message)
+        else:
+            logger.debug(message)
     
     async def _auto_upload_artifacts(self, task: Task) -> Optional[UploadedArtifacts]:
         """
@@ -207,15 +217,6 @@ class AgentService:
             return True
             
         return False
-        # Log with appropriate level
-        if level == "ERROR":
-            logger.error(message)
-        elif level == "WARNING":
-            logger.warning(message)
-        elif level == "INFO":
-            logger.info(message)
-        else:
-            logger.debug(message)
         
     def _handle_file_operation_error(self, operation: str, path: Path, error: Exception):
         """Centralized error handling for file operations"""
