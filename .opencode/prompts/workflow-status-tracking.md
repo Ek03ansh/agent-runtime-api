@@ -1,48 +1,18 @@
-# Workflow Status Tracking Instructions
+# Workflow Status Tracking
 
-## Schema Definition
-```typescript
-interface WorkflowStatus {
-  workflowInfo: {
-    sessionId: string;
-    appUrl: string;
-    workflowType: "complete";
-    startedAt: string; // ISO timestamp
-    updatedAt: string; // ISO timestamp
-    currentPhase: "PlanGeneration" | "CodeGeneration" | "RunningAndFixing" | "Completed";
-    overallStatus: "InProgress" | "Completed" | "Failed";
-  };
-  testPlan: {
-    testSuites: TestSuite[];
-  };
-}
+## File: `status/workflow-status.json`
+**Update every 10 seconds during active work**
 
-interface TestSuite {
-  suiteName: string;
-  testFilePath: string; // Relative path to the test file
-  testCases: TestCase[];
-}
-
-interface TestCase {
-  testCaseName: string;
-  status: "Generating" | "Generated" | "Running" | "Errors Found" | "Fixing" | "Fixed" | "Pass" | "Fail";
-}
-```
-
-## Workflow Status File Management
-
-### 1. Initialize Workflow Status (First Agent Only)
-Create `status/workflow-status.json`:
+## Initialize Status File
+**Create this file as your first step if it doesn't exist:**
 ```json
 {
   "workflowInfo": {
-    "sessionId": "{generate_unique_id}",
-    "appUrl": "{app_url}",
-    "workflowType": "complete",
-    "startedAt": "{current_iso_timestamp}",
-    "updatedAt": "{current_iso_timestamp}",
+    "sessionId": "session-id-from-request",
+    "appUrl": "https://app-url-from-request",
     "currentPhase": "PlanGeneration",
-    "overallStatus": "InProgress"
+    "overallStatus": "InProgress",
+    "updatedAt": "2025-09-12T19:23:12.000Z"
   },
   "testPlan": {
     "testSuites": []
@@ -50,66 +20,98 @@ Create `status/workflow-status.json`:
 }
 ```
 
-### 2. Status Update Requirements
-- **Update frequency**: Every 10 seconds during active work
-- **File location**: `status/workflow-status.json` in project root
-- **Schema compliance**: Must match `WorkflowStatus` interface exactly
-
-### 3. Phase-Status Constraints
-**Each phase only allows specific test case statuses:**
-
-| Phase | Allowed Test Case Statuses | Description |
-|-------|---------------------------|-------------|
-| `PlanGeneration` | `"Generating"`, `"Generated"` | Planning and identifying test cases |
-| `CodeGeneration` | `"Generating"`, `"Generated"` | Writing test code files |
-| `RunningAndFixing` | `"Running"`, `"Errors Found"`, `"Fixing"`, `"Fixed"` | Executing and fixing tests |
-| `Completed` | `"Pass"`, `"Fail"` | Final test results |
-
-### 4. Phase-Specific Responsibilities
-
-#### playwright-test-planner Phase
-- **Current Phase**: `"PlanGeneration"`
-- **Valid Statuses**: `"Generating"` → `"Generated"`
-- **Actions**:
-  1. Populate `testPlan.testSuites` array with identified test suites (including `testFilePath`)
-  2. Add `testCases` with `status: "Generating"` as you identify them
-  3. Update to `status: "Generated"` when test case planning is complete
-
-**Example test suite structure:**
+## Schema Structure
 ```json
 {
-  "suiteName": "Homepage Tests",
-  "testFilePath": "tests/homepage.spec.ts",
-  "testCases": [
-    {"testCaseName": "should load homepage", "status": "Generated"}
-  ]
+  "workflowInfo": {
+    "currentPhase": "PlanGeneration|CodeGeneration|RunningAndFixing|Completed",
+    "overallStatus": "InProgress|Completed|Failed",
+    "updatedAt": "ISO_timestamp"
+  },
+  "testPlan": {
+    "testSuites": [{
+      "suiteName": "string",
+      "testFilePath": "tests/example.spec.ts",
+      "testCases": [{
+        "testCaseName": "should do something",
+        "phase": "PlanGeneration|CodeGeneration|RunningAndFixing|Completed", 
+        "status": "Generating|Generated|Running|Errors Found|Fixing|Fixed|Pass|Fail"
+      }]
+    }]
+  }
 }
 ```
 
-#### playwright-test-generator Phase  
-- **First Action**: Transition to `currentPhase: "CodeGeneration"` when starting
-- **Current Phase**: `"CodeGeneration"`
-- **Valid Statuses**: `"Generating"` → `"Generated"`
-- **Actions**:
-  1. Update `status: "Generating"` when starting code generation for a test case
-  2. Update to `status: "Generated"` when test file is created and saved
+## Status Flow by Phase
 
-#### playwright-test-fixer Phase
-- **First Action**: Transition to `currentPhase: "RunningAndFixing"` when starting
-- **Current Phase**: `"RunningAndFixing"`
-- **Valid Statuses**: `"Running"` → `"Errors Found"` → `"Fixing"` → `"Fixed"`
-- **Final Statuses**: `"Pass"` or `"Fail"` (when transitioning to `"Completed"` phase)
-- **Actions**:
-  1. Update `status: "Running"` when executing a test case
-  2. Update to `status: "Errors Found"` if test fails
-  3. Update to `status: "Fixing"` when attempting to fix the test
-  4. Update to `status: "Fixed"` when test passes after fixes
-  5. Transition to `currentPhase: "Completed"` when all test cases are `"Fixed"`
-  6. Update final statuses to `"Pass"` or `"Fail"`
+**PlanGeneration Phase:**
+- Start: `"Generating"`
+- End: `"Generated"`
 
-## Critical Requirements
-1. **Always update `workflowInfo.updatedAt`** with current timestamp
-2. **Maintain phase-status consistency** - only use statuses valid for current phase (see Phase-Status Constraints table above)
-3. **Update every 10 seconds** during active work
-4. **Transition phases** only when switching agents (except final transition to `"Completed"`)
-5. **Handle errors gracefully** - never let status tracking break the main workflow
+**CodeGeneration Phase:**
+- Start: `"Generating"` 
+- End: `"Generated"`
+
+**RunningAndFixing Phase:**
+- `"Running"` (test executing)
+- `"Errors Found"` (test failed)
+- `"Fixing"` (working on fixes)
+- `"Fixed"` (test now passes)
+
+**Completed Phase:**
+- `"Pass"` (final success)
+- `"Fail"` (final failure)
+
+## What Each Agent Does
+
+### @playwright-test-planner
+1. **Initialize** status file if it doesn't exist (see above)
+2. **Set** global `currentPhase: "PlanGeneration"`
+3. **Add test cases** as you identify them:
+   ```json
+   {
+     "testCaseName": "should load homepage",
+     "phase": "PlanGeneration", 
+     "status": "Generating"
+   }
+   ```
+4. **Update to** `status: "Generated"` when planning complete
+
+### @playwright-test-generator  
+1. **Set** global `currentPhase: "CodeGeneration"`
+2. **For each test you work on**:
+   - Change test `phase: "CodeGeneration"`
+   - Set `status: "Generating"` when starting
+   - Set `status: "Generated"` when file created
+
+### @playwright-test-fixer
+1. **Set** global `currentPhase: "RunningAndFixing"`  
+2. **For each test you work on**:
+   - Change test `phase: "RunningAndFixing"`
+   - `status: "Running"` → `"Errors Found"` → `"Fixing"` → `"Fixed"`
+3. **When test is final**:
+   - Change test `phase: "Completed"`
+   - Set `status: "Pass"` or `"Fail"`
+4. **When all tests done**: Set global `currentPhase: "Completed"`
+
+## Critical Rules
+1. **Always update** `workflowInfo.updatedAt` with current ISO timestamp
+2. **Individual progression**: Each test moves through phases independently
+3. **Status validation**: Use only valid statuses for each phase (see table above)
+4. **Update frequency**: Every 10 seconds during active work
+5. **Error handling**: If status update fails, continue main work - don't break workflow
+
+## Example: Clear State During Code Generation
+```json
+{
+  "workflowInfo": {"currentPhase": "CodeGeneration"},
+  "testPlan": {"testSuites": [{
+    "testCases": [
+      {"testCaseName": "test1", "phase": "CodeGeneration", "status": "Generated"},
+      {"testCaseName": "test2", "phase": "CodeGeneration", "status": "Generating"}, 
+      {"testCaseName": "test3", "phase": "PlanGeneration", "status": "Generated"}
+    ]
+  }]}
+}
+```
+**Meaning**: Test1 coded ✅, Test2 coding 🔄, Test3 planned but not coded yet ⏳

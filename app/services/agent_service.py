@@ -109,7 +109,7 @@ class AgentService:
             await self.websocket_manager.send_debug_message(task_id, level, message, agent)
         except Exception as e:
             logger.warning(f"Failed to send WebSocket message: {e}")
-        
+
         # Log with appropriate level
         if level == "ERROR":
             logger.error(message)
@@ -839,6 +839,14 @@ class AgentService:
                     if line_text:
                         stderr_lines.append(line_text)
                         await self._send_debug(task.id, f"[STDERR] {line_text}", agent=primary_agent)
+                        
+                        # Check for session.idle indicator - OpenCode work is done but process isn't ending
+                        if "session.idle" in line_text:
+                            await self._send_debug(task.id, "Detected session.idle - OpenCode work completed, terminating process", agent=primary_agent)
+                            try:
+                                process.terminate()
+                            except Exception as e:
+                                await self._send_debug(task.id, f"Failed to terminate process: {e}", "WARNING", agent=primary_agent)
             
             # Wait for completion with timeout and stream output
             try:
@@ -859,6 +867,11 @@ class AgentService:
                 # Join lines for final output
                 stdout = '\n'.join(stdout_lines)
                 stderr = '\n'.join(stderr_lines)
+                
+                # If process was terminated due to session.idle, treat as successful completion
+                if returncode == -15 and "session.idle" in stderr:  # -15 is SIGTERM
+                    await self._send_debug(task.id, "Process terminated after session.idle - treating as successful completion", agent=primary_agent)
+                    returncode = 0
                 
             except asyncio.TimeoutError:
                 await self._send_debug(task.id, "OpenCode process timed out, terminating...", "ERROR", agent=primary_agent)
