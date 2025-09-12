@@ -1,11 +1,21 @@
 #!/usr/bin/env pwsh
 # Container Apps Deployment Script for Agent Runtime API
 # This script rebuilds and redeploys the latest changes to Azure Container Apps Session Pool
+#
+# Usage Examples:
+# .\deploy-containerapp.ps1                                    # Deploy with default timeouts
+# .\deploy-containerapp.ps1 -CooldownPeriod 600               # 10 minute cooldown
+# .\deploy-containerapp.ps1 -SessionTimeout 7200              # 2 hour session timeout
+# .\deploy-containerapp.ps1 -IdleTimeout 3600                 # 1 hour idle timeout
+# .\deploy-containerapp.ps1 -SkipBuild -SessionTimeout 1800   # Skip build, 30 min timeout
 
 param(
     [switch]$SkipBuild,
     [switch]$Verbose,
-    [string]$RegistryPassword = $env:ACR_PASSWORD
+    [string]$RegistryPassword = $env:ACR_PASSWORD,
+    [int]$CooldownPeriod = 300,
+    [int]$SessionTimeout = 3600,
+    [int]$IdleTimeout = 1800
 )
 
 # Configuration - Updated for Container Apps
@@ -21,6 +31,10 @@ $SUBSCRIPTION_ID = "acaab7ee-e0fb-43d9-bce9-0e403b60ce06"
 
 Write-Host "🚀 Agent Runtime API - Container Apps Deployment Script" -ForegroundColor Cyan
 Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "⏱️  Timeout Settings:" -ForegroundColor Blue
+Write-Host "   Cooldown Period: $CooldownPeriod seconds" -ForegroundColor Gray
+Write-Host "   Session Timeout: $SessionTimeout seconds" -ForegroundColor Gray
+Write-Host "   Idle Timeout: $IdleTimeout seconds" -ForegroundColor Gray
 
 # Function to check command success
 function Test-LastCommand {
@@ -90,7 +104,10 @@ if ($sessionPoolExists) {
         --image "${ACR_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}" `
         --registry-server $ACR_SERVER `
         --registry-username $ACR_NAME `
-        --registry-password $RegistryPassword
+        --registry-password $RegistryPassword `
+        --cooldown-period $CooldownPeriod `
+        --session-timeout $SessionTimeout `
+        --idle-timeout $IdleTimeout
     Test-LastCommand "Session pool updated successfully"
 } else {
     Write-Host "🆕 Session pool doesn't exist. Creating..." -ForegroundColor Yellow
@@ -109,7 +126,9 @@ if ($sessionPoolExists) {
         --cpu 2 `
         --memory 4Gi `
         --target-port 5001 `
-        --cooldown-period 300 `
+        --cooldown-period $CooldownPeriod `
+        --session-timeout $SessionTimeout `
+        --idle-timeout $IdleTimeout `
         --network-status EgressEnabled `
         --max-sessions 100 `
         --ready-sessions 5 `
@@ -135,6 +154,8 @@ if ($sessionPoolInfo) {
     Write-Host "   Image: $($sessionPoolInfo.properties.containerType.customContainerTemplate.containers[0].image)" -ForegroundColor Gray
     Write-Host "   CPU: $($sessionPoolInfo.properties.containerType.customContainerTemplate.containers[0].resources.cpu)" -ForegroundColor Gray
     Write-Host "   Memory: $($sessionPoolInfo.properties.containerType.customContainerTemplate.containers[0].resources.memory)" -ForegroundColor Gray
+    Write-Host "   Cooldown Period: $($sessionPoolInfo.properties.dynamicPoolConfiguration.cooldownPeriodInSeconds)s" -ForegroundColor Gray
+    Write-Host "   Session Timeout: $($sessionPoolInfo.properties.sessionNetworkConfiguration.sessionTimeout)s" -ForegroundColor Gray
     
     # Show session pool status
     Write-Host "`n📈 Session Pool Status:" -ForegroundColor Green
