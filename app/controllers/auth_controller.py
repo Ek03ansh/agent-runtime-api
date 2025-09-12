@@ -6,8 +6,11 @@ import logging
 import pty
 import os
 import select
+import json
+from pathlib import Path
+from typing import Optional
 from app.core.config import settings
-from app.models import AuthLoginResponse, AuthStatusResponse
+from app.models import AuthLoginResponse, AuthStatusResponse, AuthInjectTokenRequest
 
 # Set up logger for auth controller
 logger = logging.getLogger(__name__)
@@ -29,6 +32,82 @@ def clean_ansi_codes(text: str) -> str:
     """Remove ANSI escape codes from text to make it readable"""
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     return ansi_escape.sub('', text)
+
+def _get_github_copilot_refresh_token() -> Optional[str]:
+    """Read GitHub Copilot refresh token from OpenCode auth.json file"""
+    try:
+        # Use the same path structure as the agent service
+        opencode_storage_path = Path.home() / ".local" / "share" / "opencode"
+        auth_file_path = opencode_storage_path / "auth.json"
+        
+        if not auth_file_path.exists():
+            logger.debug(f"Auth file not found at {auth_file_path}")
+            return None
+        
+        with open(auth_file_path, 'r', encoding='utf-8') as f:
+            auth_data = json.load(f)
+        
+        # Extract GitHub Copilot refresh token
+        github_copilot_auth = auth_data.get("github-copilot", {})
+        refresh_token = github_copilot_auth.get("refresh")
+        
+        if refresh_token:
+            logger.debug("Successfully retrieved GitHub Copilot refresh token")
+            return refresh_token
+        else:
+            logger.debug("No refresh token found in auth data")
+            return None
+            
+    except FileNotFoundError:
+        logger.debug("OpenCode auth.json file not found")
+        return None
+    except json.JSONDecodeError as e:
+        logger.warning(f"Failed to parse auth.json: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Error reading refresh token: {e}")
+        return None
+
+def _inject_github_copilot_refresh_token(refresh_token: str) -> bool:
+    """Inject/update GitHub Copilot refresh token in OpenCode auth.json file"""
+    try:
+        # Use the same path structure as the agent service
+        opencode_storage_path = Path.home() / ".local" / "share" / "opencode"
+        auth_file_path = opencode_storage_path / "auth.json"
+        
+        # Ensure the directory exists
+        opencode_storage_path.mkdir(parents=True, exist_ok=True)
+        
+        # Load existing auth data or create new structure
+        auth_data = {}
+        if auth_file_path.exists():
+            try:
+                with open(auth_file_path, 'r', encoding='utf-8') as f:
+                    auth_data = json.load(f)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"Failed to read existing auth.json, creating new: {e}")
+                auth_data = {}
+        
+        # Update/create GitHub Copilot auth entry
+        if "github-copilot" not in auth_data:
+            auth_data["github-copilot"] = {}
+        
+        auth_data["github-copilot"].update({
+            "type": "oauth",
+            "refresh": refresh_token,
+            # Note: We don't set access token or expires as those will be handled by OpenCode
+        })
+        
+        # Write updated auth data
+        with open(auth_file_path, 'w', encoding='utf-8') as f:
+            json.dump(auth_data, f, indent=2)
+        
+        logger.info("Successfully injected GitHub Copilot refresh token")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to inject refresh token: {e}")
+        return False
 
 # Store ongoing auth process
 _auth_process = None
@@ -189,7 +268,7 @@ async def auth_login():
 
 @router.get("/auth/status", response_model=AuthStatusResponse)
 async def auth_status():
-    """Check current OpenCode authentication status"""
+    """Check current OpenCode authentication status and return refresh token"""
     if not settings.opencode_available:
         raise HTTPException(
             status_code=500, 
@@ -214,10 +293,70 @@ async def auth_status():
             "Commands:" not in result.stdout  # Not help text
         )
         
-        return AuthStatusResponse(authenticated=is_authenticated)
+        # Get refresh token if authenticated
+        refresh_token = None
+        if is_authenticated:
+            refresh_token = _get_github_copilot_refresh_token()
+        
+        return AuthStatusResponse(
+            authenticated=is_authenticated,
+            refreshToken=refresh_token
+        )
             
     except subprocess.TimeoutExpired:
-        return AuthStatusResponse(authenticated=False)
+        return AuthStatusResponse(authenticated=False, refreshToken=None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
+
+@router.post("/auth", response_model=AuthStatusResponse)
+async def inject_refresh_token(request: AuthInjectTokenRequest):
+    """Inject GitHub Copilot refresh token and verify authentication"""
+    if not settings.opencode_available:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"OpenCode command not found: {settings.opencode_command}"
+        )
+    
+    try:
+        # Inject the refresh token into auth.json
+        success = _inject_github_copilot_refresh_token(request.refreshToken)
+        
+        if not success:
+            raise HTTPException(
+                status_code=500, 
+                detail="Failed to inject refresh token into auth.json"
+            )
+        
+        # Verify authentication status after injection
+        result = subprocess.run(
+            [settings.opencode_command, "auth", "list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding='utf-8',
+            errors='replace'
+        )
+        
+        # Check if GitHub Copilot is now authenticated
+        is_authenticated = (
+            result.returncode == 0 and 
+            result.stdout.strip() and
+            "GitHub Copilot" in result.stdout and 
+            "Commands:" not in result.stdout  # Not help text
+        )
+        
+        # Return the current status including the injected token
+        return AuthStatusResponse(
+            authenticated=is_authenticated,
+            refreshToken=request.refreshToken if is_authenticated else None
+        )
+            
+    except subprocess.TimeoutExpired:
+        # Return failure status
+        return AuthStatusResponse(authenticated=False, refreshToken=None)
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Token injection failed: {str(e)}")
 

@@ -23,6 +23,10 @@ class SignInDetails(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
 
+class ArtifactsUrl(BaseModel):
+    sas_url: str = Field(..., description="SAS URL for Azure Storage container with write permissions")
+    expires_at: datetime = Field(..., description="SAS URL expiration timestamp")
+
 class TaskConfiguration(BaseModel):
     app_url: str = Field(..., description="Target application URL to test")
     sign_in: Optional[SignInDetails] = Field(default=None, description="Sign-in details if authentication required")
@@ -32,6 +36,7 @@ class TaskRequest(BaseModel):
     task_type: TaskType = Field(..., description="Type of task to execute")
     configuration: TaskConfiguration = Field(..., description="Task configuration")
     session_id: str = Field(..., description="OpenCode session ID to continue or create")
+    artifacts_url: Optional[ArtifactsUrl] = Field(default=None, description="Azure Storage SAS URL for artifacts upload")
 
 class SessionFile(BaseModel):
     name: str = Field(..., description="File name")
@@ -52,6 +57,7 @@ class Task(BaseModel):
     created_at: datetime = Field(..., description="Task creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
+    artifacts_url: Optional[ArtifactsUrl] = Field(default=None, description="Azure Storage SAS URL for artifacts")
     
     # Internal tracking fields (not exposed in API responses)
     error: Optional[str] = Field(default=None, description="Error message if task failed")
@@ -69,6 +75,7 @@ class TaskResponse(BaseModel):
     created_at: datetime = Field(..., description="Task creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
+    artifacts_url: Optional[ArtifactsUrl] = Field(default=None, description="Azure Storage SAS URL for artifacts")
     error: Optional[str] = Field(default=None, description="Error message if task failed")
     
     @classmethod
@@ -84,6 +91,7 @@ class TaskResponse(BaseModel):
             created_at=task.created_at,
             updated_at=task.updated_at,
             completed_at=task.completed_at,
+            artifacts_url=task.artifacts_url,
             error=task.error
         )
 
@@ -123,6 +131,10 @@ class AuthLoginResponse(BaseModel):
 
 class AuthStatusResponse(BaseModel):
     authenticated: bool = Field(..., description="Whether user is authenticated")
+    refreshToken: Optional[str] = Field(None, description="GitHub Copilot refresh token")
+
+class AuthInjectTokenRequest(BaseModel):
+    refreshToken: str = Field(..., description="GitHub Copilot refresh token to inject")
 
 # Cleanup API Models
 class CleanupFailures(BaseModel):

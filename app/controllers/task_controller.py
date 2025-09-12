@@ -27,7 +27,8 @@ async def create_task(
         task = await agent_service.create_task(
             task_type=task_request.task_type,
             configuration=task_request.configuration,
-            session_id=task_request.session_id
+            session_id=task_request.session_id,
+            artifacts_url=task_request.artifacts_url
         )
         
         # Start execution in background using asyncio with proper task reference storage

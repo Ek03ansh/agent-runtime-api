@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from app.models import Task, TaskType, TaskStatus, TaskConfiguration, SessionFile
+from app.models import Task, TaskType, TaskStatus, TaskConfiguration, SessionFile, ArtifactsUrl
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -174,7 +174,7 @@ class AgentService:
         except (OSError, PermissionError, shutil.Error) as e:
             self._handle_file_operation_error("copy directory", f"{src} to {dst}", e)
     
-    async def create_task(self, task_type: TaskType, configuration: TaskConfiguration, session_id: str) -> Task:
+    async def create_task(self, task_type: TaskType, configuration: TaskConfiguration, session_id: str, artifacts_url: Optional[ArtifactsUrl] = None) -> Task:
         """Create a new task with proper separation of OpenCode storage vs working directory"""
         task_id = str(uuid.uuid4())
         
@@ -193,6 +193,7 @@ class AgentService:
             configuration=configuration,
             session_path=str(working_dir),
             session_id=session_id,
+            artifacts_url=artifacts_url,
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
