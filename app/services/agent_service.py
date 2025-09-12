@@ -7,11 +7,14 @@ import hashlib
 import traceback
 import time
 import json
+import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from app.models import Task, TaskType, TaskStatus, TaskConfiguration, SessionFile, ArtifactsUrl
+from app.models import Task, TaskType, TaskStatus, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts
+from app.services.azure_storage_service import AzureStorageService
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -106,7 +109,104 @@ class AgentService:
             await self.websocket_manager.send_debug_message(task_id, level, message, agent)
         except Exception as e:
             logger.warning(f"Failed to send WebSocket message: {e}")
+    
+    async def _auto_upload_artifacts(self, task: Task) -> Optional[UploadedArtifacts]:
+        """
+        Auto-upload task artifacts to Azure Storage if artifacts_url is provided
         
+        Args:
+            task: The completed task
+            
+        Returns:
+            UploadedArtifacts object if upload was successful, None otherwise
+        """
+        if not task.artifacts_url:
+            logger.debug(f"No artifacts_url provided for task {task.id}, skipping auto-upload")
+            return None
+            
+        try:
+            # Check if SAS URL is expired
+            if task.artifacts_url.expires_at < datetime.now():
+                logger.warning(f"SAS URL expired for task {task.id}, skipping auto-upload")
+                task.error = f"{task.error}\nNote: SAS URL expired, artifacts not uploaded" if task.error else "SAS URL expired, artifacts not uploaded"
+                return None
+            
+            # Validate SAS URL format
+            if not AzureStorageService.validate_sas_url(task.artifacts_url.sas_url):
+                logger.warning(f"Invalid SAS URL format for task {task.id}, skipping auto-upload")
+                task.error = f"{task.error}\nNote: Invalid SAS URL, artifacts not uploaded" if task.error else "Invalid SAS URL, artifacts not uploaded"
+                return None
+            
+            await self._send_debug(task.id, "Starting auto-upload of artifacts to Azure Storage...")
+            
+            # Create ZIP of session directory (reuse existing logic from session controller)
+            session_path = Path(task.session_path)
+            if not session_path.exists():
+                logger.warning(f"Session path not found for task {task.id}: {session_path}")
+                return None
+            
+            # Create temporary ZIP file
+            temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+            zip_path = temp_zip.name
+            temp_zip.close()
+            
+            try:
+                # Create ZIP file with session contents
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for file_path in session_path.rglob("*"):
+                        if file_path.is_file() and not self._should_exclude_path(file_path):
+                            try:
+                                relative_path = file_path.relative_to(session_path)
+                                zipf.write(file_path, relative_path)
+                            except (OSError, PermissionError):
+                                continue
+                
+                # Generate blob name with timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                blob_name = f"session_{task.session_id}_{timestamp}.zip"
+                
+                # Upload to Azure Storage
+                zip_file_path = Path(zip_path)
+                blob_url = await AzureStorageService.upload_file_to_sas_url(
+                    file_path=zip_file_path,
+                    sas_url=task.artifacts_url.sas_url,
+                    blob_name=blob_name
+                )
+                
+                file_size = zip_file_path.stat().st_size
+                await self._send_debug(task.id, f"Successfully uploaded artifacts: {blob_name} ({file_size} bytes)")
+                
+                # Return UploadedArtifacts object with full details
+                return UploadedArtifacts(
+                    blob_url=blob_url,
+                    blob_name=blob_name,
+                    uploaded_at=datetime.now(),
+                    file_size=file_size
+                )
+                
+            finally:
+                # Clean up temporary ZIP file
+                Path(zip_path).unlink(missing_ok=True)
+                
+        except Exception as e:
+            logger.error(f"Failed to auto-upload artifacts for task {task.id}: {e}")
+            await self._send_debug(task.id, f"Auto-upload failed: {str(e)}", level="ERROR")
+            # Don't fail the task, just log the upload failure
+            task.error = f"{task.error}\nNote: Artifact upload failed: {str(e)}" if task.error else f"Artifact upload failed: {str(e)}"
+            return None
+    
+    def _should_exclude_path(self, file_path: Path) -> bool:
+        """Check if a path should be excluded from ZIP (reuse session controller logic)"""
+        # Exclude certain directories
+        for part in file_path.parts:
+            if part in {'node_modules', '.git', '__pycache__', '.vscode', '.idea', '.opencode'}:
+                return True
+        
+        # Exclude certain files
+        if file_path.name in {'opencode.json', '.gitkeep'}:
+            return True
+            
+        return False
         # Log with appropriate level
         if level == "ERROR":
             logger.error(message)
@@ -283,6 +383,13 @@ class AgentService:
                 task.status = TaskStatus.failed
                 task.error = error_detail or "Task execution failed with unknown error"
             
+            # Auto-upload artifacts if artifacts_url is provided (for both success and failure)
+            uploaded_artifacts = await self._auto_upload_artifacts(task)
+            if uploaded_artifacts:
+                # Store uploaded artifacts details in separate field (preserving original SAS URL)
+                task.uploaded_artifacts = uploaded_artifacts
+                logger.info(f"Task {task.id} artifacts uploaded to: {uploaded_artifacts.blob_url}")
+            
             task.updated_at = datetime.now()
             return success
             
@@ -290,6 +397,14 @@ class AgentService:
             tb = traceback.format_exc()
             task.status = TaskStatus.failed
             task.error = f"Task execution exception: {str(e)} (Type: {type(e).__name__})\nTraceback: {tb}"
+            
+            # Auto-upload artifacts even on exception (partial artifacts may be useful)
+            uploaded_artifacts = await self._auto_upload_artifacts(task)
+            if uploaded_artifacts:
+                # Store uploaded artifacts details in separate field (preserving original SAS URL)
+                task.uploaded_artifacts = uploaded_artifacts
+                logger.info(f"Task {task.id} artifacts uploaded after exception to: {uploaded_artifacts.blob_url}")
+            
             task.updated_at = datetime.now()
             return False
     

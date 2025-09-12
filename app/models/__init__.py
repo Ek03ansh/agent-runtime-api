@@ -27,6 +27,12 @@ class ArtifactsUrl(BaseModel):
     sas_url: str = Field(..., description="SAS URL for Azure Storage container with write permissions")
     expires_at: datetime = Field(..., description="SAS URL expiration timestamp")
 
+class UploadedArtifacts(BaseModel):
+    blob_url: str = Field(..., description="Direct URL to the uploaded ZIP file in Azure Storage")
+    blob_name: str = Field(..., description="Name of the uploaded blob/file")
+    uploaded_at: datetime = Field(..., description="Timestamp when upload completed")
+    file_size: int = Field(..., description="Size of uploaded file in bytes")
+
 class TaskConfiguration(BaseModel):
     app_url: str = Field(..., description="Target application URL to test")
     sign_in: Optional[SignInDetails] = Field(default=None, description="Sign-in details if authentication required")
@@ -58,6 +64,7 @@ class Task(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
     artifacts_url: Optional[ArtifactsUrl] = Field(default=None, description="Azure Storage SAS URL for artifacts")
+    uploaded_artifacts: Optional[UploadedArtifacts] = Field(default=None, description="Details of uploaded artifacts")
     
     # Internal tracking fields (not exposed in API responses)
     error: Optional[str] = Field(default=None, description="Error message if task failed")
@@ -76,6 +83,7 @@ class TaskResponse(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
     artifacts_url: Optional[ArtifactsUrl] = Field(default=None, description="Azure Storage SAS URL for artifacts")
+    uploaded_artifacts: Optional[UploadedArtifacts] = Field(default=None, description="Details of uploaded artifacts")
     error: Optional[str] = Field(default=None, description="Error message if task failed")
     
     @classmethod
@@ -92,6 +100,7 @@ class TaskResponse(BaseModel):
             updated_at=task.updated_at,
             completed_at=task.completed_at,
             artifacts_url=task.artifacts_url,
+            uploaded_artifacts=task.uploaded_artifacts,
             error=task.error
         )
 
