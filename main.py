@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.controllers.task_controller import router as task_router
 from app.controllers.auth_controller import router as auth_router
 from app.controllers.session_controller import router as session_router
-from app.utils.helpers import ensure_directory_exists
+from app.utils.file_utils import ensure_directory_exists
 
 logger = logging.getLogger(__name__)
 

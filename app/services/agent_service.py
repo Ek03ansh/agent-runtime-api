@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from app.utils.file_utils import should_exclude_path
+
 from app.models import Task, TaskType, TaskStatus, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts
 from app.services.azure_storage_service import AzureStorageService
 from app.core.config import settings
@@ -201,17 +203,8 @@ class AgentService:
             return None
     
     def _should_exclude_path(self, file_path: Path) -> bool:
-        """Check if a path should be excluded from ZIP (reuse session controller logic)"""
-        # Exclude certain directories
-        for part in file_path.parts:
-            if part in {'node_modules', '.git', '__pycache__', '.vscode', '.idea', '.opencode'}:
-                return True
-        
-        # Exclude certain files
-        if file_path.name in {'opencode.json', '.gitkeep'}:
-            return True
-            
-        return False
+        """Check if a path should be excluded from ZIP"""
+        return should_exclude_path(file_path)
         
     def _handle_file_operation_error(self, operation: str, path: Path, error: Exception):
         """Centralized error handling for file operations"""

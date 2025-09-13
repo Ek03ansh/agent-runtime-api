@@ -27,8 +27,5 @@
     "@playwright/mcp": "next",
     "@playwright/test": "next",
     "@types/node": "^24.3.0"
-  },
-  "dependencies": {
-    "setup": "^0.0.3"
   }
 }

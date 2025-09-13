@@ -13,14 +13,10 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.models import SessionFile, SessionListResponse, SessionFilesResponse, ArtifactsUrl, UploadedArtifacts, UploadRequest
 from app.services.azure_storage_service import AzureStorageService
+from app.utils.file_utils import should_exclude_path, TEXT_FILE_ENCODING
 
 router = APIRouter(tags=["sessions"])
 logger = logging.getLogger(__name__)
-
-# Constants
-EXCLUDED_DIRS = {'node_modules', '.git', '__pycache__', '.vscode', '.idea', '.opencode'}
-EXCLUDED_FILES = {'opencode.json', '.gitkeep'}
-TEXT_FILE_ENCODING = 'utf-8'
 
 def find_session_path(session_id: str) -> Optional[Path]:
     """Find session path across all app directories"""
@@ -34,18 +30,6 @@ def find_session_path(session_id: str) -> Optional[Path]:
                 return potential_path
     
     return None
-
-def should_exclude_path(file_path: Path) -> bool:
-    """Check if path should be excluded from processing"""
-    # Check if any excluded directory is in the path
-    if any(excluded in file_path.parts for excluded in EXCLUDED_DIRS):
-        return True
-    
-    # Check if the file name itself should be excluded
-    if file_path.name in EXCLUDED_FILES:
-        return True
-    
-    return False
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def get_sessions() -> SessionListResponse:
