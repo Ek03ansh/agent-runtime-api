@@ -805,6 +805,7 @@ class AgentService:
             # Stream output in real-time
             stdout_lines = []
             stderr_lines = []
+            session_idle_detected = False
             
             async def stream_stdout():
                 """Stream stdout in real-time"""
@@ -819,6 +820,7 @@ class AgentService:
             
             async def stream_stderr():
                 """Stream stderr in real-time"""
+                nonlocal session_idle_detected
                 while True:
                     line = await process.stderr.readline()
                     if not line:
@@ -831,16 +833,17 @@ class AgentService:
                         # Check for session.idle indicator - OpenCode work is done but process isn't ending
                         if "session.idle" in line_text:
                             await self._send_debug(task.id, "Detected session.idle - OpenCode work completed, terminating process", agent=primary_agent)
+                            session_idle_detected = True
                             try:
                                 process.terminate()
-                                
-                                # Auto-upload artifacts if artifacts_url is provided (for both success and failure)
-                                uploaded_artifacts = await self._auto_upload_artifacts(task)
-                                if uploaded_artifacts:
-                                    # Store uploaded artifacts details in separate field (preserving original SAS URL)
-                                    task.uploaded_artifacts = uploaded_artifacts
-                                    logger.info(f"Task {task.id} artifacts uploaded to: {uploaded_artifacts.blob_url}")
-                                
+                                # Wait for graceful termination, force kill if needed
+                                try:
+                                    await asyncio.wait_for(process.wait(), timeout=3)
+                                except asyncio.TimeoutError:
+                                    process.kill()
+                                    await process.wait()
+                                # Break out of stderr loop since process is terminated
+                                break
                             except Exception as e:
                                 await self._send_debug(task.id, f"Failed to terminate process: {e}", "WARNING", agent=primary_agent)
             
@@ -850,22 +853,40 @@ class AgentService:
                 stdout_task = asyncio.create_task(stream_stdout())
                 stderr_task = asyncio.create_task(stream_stderr())
                 
-                # Wait for process completion with timeout
-                returncode = await asyncio.wait_for(
-                    process.wait(),
-                    timeout=OPENCODE_TIMEOUT_SECONDS
-                )
+                # Wait for process completion with timeout (unless already terminated by session.idle detection)
+                if not session_idle_detected:
+                    returncode = await asyncio.wait_for(
+                        process.wait(),
+                        timeout=OPENCODE_TIMEOUT_SECONDS
+                    )
+                else:
+                    # Process was already terminated, get the return code
+                    returncode = process.returncode
                 
-                # Ensure all output is captured
-                await stdout_task
-                await stderr_task
+                # Handle streaming tasks completion
+                if session_idle_detected:
+                    # Cancel streaming tasks since process is terminated
+                    stdout_task.cancel()
+                    stderr_task.cancel()
+                    try:
+                        await stdout_task
+                    except asyncio.CancelledError:
+                        pass
+                    try:
+                        await stderr_task
+                    except asyncio.CancelledError:
+                        pass
+                else:
+                    # Normal completion - wait for streaming tasks to finish
+                    await stdout_task
+                    await stderr_task
                 
                 # Join lines for final output
                 stdout = '\n'.join(stdout_lines)
                 stderr = '\n'.join(stderr_lines)
                 
                 # If process was terminated due to session.idle, treat as successful completion
-                if returncode == -15 and "session.idle" in stderr:  # -15 is SIGTERM
+                if session_idle_detected:
                     await self._send_debug(task.id, "Process terminated after session.idle - treating as successful completion", agent=primary_agent)
                     returncode = 0
                 
@@ -889,7 +910,6 @@ class AgentService:
             self._unregister_process(task.id)
             
             # Note: Output is already streamed in real-time above, no need to log it again here
-            
             if returncode != 0:
                 error_msg = f"Agent '{primary_agent}' failed with exit code {returncode}\n"
                 error_msg += f"Command: {' '.join(cmd_args)}\n"

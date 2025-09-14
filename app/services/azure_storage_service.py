@@ -9,6 +9,10 @@ from azure.core.exceptions import AzureError
 
 logger = logging.getLogger(__name__)
 
+# Suppress verbose Azure SDK logging
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
 class AzureStorageService:
     """Service for uploading files to Azure Blob Storage using SAS URLs"""
     
