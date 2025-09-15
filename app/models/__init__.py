@@ -18,6 +18,11 @@ class TaskStatus(str, Enum):
     failed = "failed"
     cancelled = "cancelled"
 
+class TaskPhase(str, Enum):
+    planning = "planning"
+    generating_tests = "generating_tests"
+    fixing_tests = "fixing_tests"
+
 class SignInDetails(BaseModel):
     method: Literal["none", "username-password"] = "none"
     username: Optional[str] = None
@@ -56,6 +61,7 @@ class Task(BaseModel):
     id: str = Field(..., description="Unique task identifier")
     task_type: TaskType = Field(..., description="Type of task")
     status: TaskStatus = Field(..., description="Current task status")
+    current_phase: TaskPhase = Field(default=TaskPhase.planning, description="Current execution phase")
     configuration: TaskConfiguration = Field(..., description="Task configuration")
     session_path: str = Field(..., description="Path to task session directory")
     session_id: str = Field(..., description="OpenCode session ID for multi-agent tasks")
@@ -75,6 +81,7 @@ class TaskResponse(BaseModel):
     id: str = Field(..., description="Unique task identifier")
     task_type: TaskType = Field(..., description="Type of task")
     status: TaskStatus = Field(..., description="Current task status")
+    current_phase: TaskPhase = Field(..., description="Current execution phase")
     configuration: TaskConfiguration = Field(..., description="Task configuration")
     session_path: str = Field(..., description="Path to task session directory")
     session_id: str = Field(..., description="OpenCode session ID for multi-agent tasks")
@@ -92,6 +99,7 @@ class TaskResponse(BaseModel):
             id=task.id,
             task_type=task.task_type,
             status=task.status,
+            current_phase=task.current_phase,
             configuration=task.configuration,
             session_path=task.session_path,
             session_id=task.session_id,

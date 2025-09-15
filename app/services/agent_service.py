@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from app.utils.file_utils import should_exclude_path
 
-from app.models import Task, TaskType, TaskStatus, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts
+from app.models import Task, TaskType, TaskStatus, TaskPhase, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts
 from app.services.azure_storage_service import AzureStorageService
 from app.core.config import settings
 
@@ -121,6 +121,60 @@ class AgentService:
             logger.info(message)
         else:
             logger.debug(message)
+    
+    async def _load_phase_tracking_prompt(self) -> str:
+        """Load the phase tracking prompt from file"""
+        try:
+            phase_tracking_path = Path(".opencode/prompts/phase-tracking.md")
+            if phase_tracking_path.exists():
+                with open(phase_tracking_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            else:
+                logger.warning("Phase tracking prompt file not found")
+                return ""
+        except Exception as e:
+            logger.warning(f"Failed to load phase tracking prompt: {e}")
+            return ""
+    
+    async def _monitor_phase_status_file(self, task_id: str):
+        """Monitor the phase status file and update task accordingly"""
+        task = self.tasks.get(task_id)
+        if not task:
+            return
+        
+        status_file_path = Path(task.session_path) / "status" / "phase.json"
+        
+        while task.status == TaskStatus.running:
+            try:
+                if status_file_path.exists():
+                    with open(status_file_path, 'r', encoding='utf-8') as f:
+                        status_data = json.load(f)
+                    
+                    # Update task with phase information
+                    phase_str = status_data.get('current_phase', 'planning')
+                    try:
+                        new_phase = TaskPhase(phase_str)
+                        if new_phase != task.current_phase:
+                            task.current_phase = new_phase
+                            task.updated_at = datetime.now()
+                            
+                            # Send WebSocket update
+                            try:
+                                await self.websocket_manager.send_status_update(
+                                    task_id, 
+                                    task.status.value, 
+                                    f"{new_phase.value.replace('_', ' ').title()}"
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to send phase update via WebSocket: {e}")
+                    except ValueError:
+                        logger.warning(f"Invalid phase value in status file: {phase_str}")
+                        
+            except Exception as e:
+                logger.debug(f"Error reading phase status file: {e}")
+            
+            # Check every 2 seconds
+            await asyncio.sleep(2)
     
     async def _auto_upload_artifacts(self, task: Task) -> Optional[UploadedArtifacts]:
         """
@@ -362,8 +416,19 @@ class AgentService:
             task.status = TaskStatus.running
             task.updated_at = datetime.now()
             
-            # Execute based on task type
-            success, error_detail = await self._execute_opencode_pipeline(task)
+            # Start phase monitoring in background
+            monitor_task = asyncio.create_task(self._monitor_phase_status_file(task.id))
+            
+            try:
+                # Execute based on task type
+                success, error_detail = await self._execute_opencode_pipeline(task)
+            finally:
+                # Cancel phase monitoring
+                monitor_task.cancel()
+                try:
+                    await monitor_task
+                except asyncio.CancelledError:
+                    pass
             
             if success:
                 task.status = TaskStatus.completed
@@ -397,29 +462,6 @@ class AgentService:
             task.updated_at = datetime.now()
             return False
     
-    async def _append_workflow_status_instructions(self, task_id: str, instructions: str) -> str:
-        """Append workflow status tracking instructions to the main instructions"""
-        workflow_status_prompt_path = ".opencode/prompts/workflow-status-tracking.md"
-        try:
-            with open(workflow_status_prompt_path, 'r', encoding='utf-8') as f:
-                workflow_status_instructions = f.read()
-            
-            # Append workflow tracking instructions to the main instructions
-            if instructions:
-                enhanced_instructions = f"{instructions}\n\n---\n\n{workflow_status_instructions}"
-            else:
-                enhanced_instructions = workflow_status_instructions
-                
-            await self._send_debug(task_id, "Added workflow status tracking instructions to agent prompt")
-            return enhanced_instructions
-                
-        except FileNotFoundError:
-            await self._send_debug(task_id, f"Warning: Workflow status tracking prompt not found at {workflow_status_prompt_path}", "WARNING")
-            return instructions
-        except Exception as e:
-            await self._send_debug(task_id, f"Warning: Failed to load workflow status tracking prompt: {e}", "WARNING")
-            return instructions
-
     async def _create_opencode_config(self, task: Task):
         """Create session directory and copy essential OpenCode configuration"""
         try:
@@ -428,6 +470,11 @@ class AgentService:
             # Ensure session directory exists with proper permissions
             session_path.mkdir(parents=True, exist_ok=True)
             self._ensure_directory_permissions(session_path)
+            
+            # Create status directory for phase tracking
+            status_dir = session_path / "status"
+            status_dir.mkdir(exist_ok=True)
+            self._ensure_directory_permissions(status_dir)
             
             # Copy opencode.json from config directory to session
             session_config_path = session_path / "opencode.json"
@@ -751,8 +798,11 @@ class AgentService:
                 if task.configuration.instructions:
                     instructions = f"{task.configuration.instructions}\n\n{instructions}"
             
-            # Append workflow status tracking instructions for all task types
-            # instructions = await self._append_workflow_status_instructions(task.id, instructions)
+            # Load and append phase tracking instructions
+            phase_tracking_instructions = await self._load_phase_tracking_prompt()
+            if phase_tracking_instructions:
+                instructions = f"{instructions}\n\n---\n\n{phase_tracking_instructions}"
+                await self._send_debug(task.id, "Added phase tracking instructions to prompt")
             
             # Build command with hardcoded GitHub Copilot configuration
             model_identifier = f"{settings.provider}/{settings.model}"  # github-copilot/claude-sonnet-4
