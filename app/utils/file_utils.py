@@ -15,7 +15,8 @@ EXCLUDED_DIRS: Set[str] = {
     '__pycache__', 
     '.vscode', 
     '.idea', 
-    '.opencode'
+    '.opencode',
+    'status'
 }
 
 EXCLUDED_FILES: Set[str] = {
