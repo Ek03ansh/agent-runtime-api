@@ -23,8 +23,12 @@ class TaskPhase(str, Enum):
     generating_tests = "generating_tests"
     fixing_tests = "fixing_tests"
 
+class SignInMethod(str, Enum):
+    none = "none"
+    username_password = "username-password"
+
 class SignInDetails(BaseModel):
-    method: Literal["none", "username-password"] = "none"
+    method: SignInMethod = SignInMethod.none
     username: Optional[str] = None
     password: Optional[str] = None
 

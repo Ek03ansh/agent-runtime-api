@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from app.utils.file_utils import should_exclude_path
 
-from app.models import Task, TaskType, TaskStatus, TaskPhase, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts
+from app.models import Task, TaskType, TaskStatus, TaskPhase, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts, SignInMethod
 from app.services.azure_storage_service import AzureStorageService
 from app.core.config import settings
 
@@ -125,7 +125,7 @@ class AgentService:
     async def _load_phase_tracking_prompt(self) -> str:
         """Load the phase tracking prompt from file"""
         try:
-            phase_tracking_path = Path(".opencode/prompts/phase-tracking.md")
+            phase_tracking_path = Path(".opencode/prompts/system/phase-tracking.md")
             if phase_tracking_path.exists():
                 with open(phase_tracking_path, 'r', encoding='utf-8') as f:
                     return f.read()
@@ -134,6 +134,24 @@ class AgentService:
                 return ""
         except Exception as e:
             logger.warning(f"Failed to load phase tracking prompt: {e}")
+            return ""
+    
+    async def _load_authentication_prompt(self, username: str, password: str) -> str:
+        """Load and customize the authentication prompt with credentials"""
+        try:
+            auth_prompt_path = Path(".opencode/prompts/system/authentication.md")
+            if auth_prompt_path.exists():
+                with open(auth_prompt_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                # Replace placeholders with actual credentials
+                content = content.replace("{username}", username)
+                content = content.replace("{password}", password)
+                return content
+            else:
+                logger.warning("Authentication prompt file not found")
+                return ""
+        except Exception as e:
+            logger.warning(f"Failed to load authentication prompt: {e}")
             return ""
     
     async def _monitor_phase_status_file(self, task_id: str):
@@ -776,10 +794,10 @@ class AgentService:
             
             # Read the appropriate prompt file and substitute the app_url
             prompt_files = {
-                TaskType.complete: ".opencode/prompts/complete-testing-workflow.md",
-                TaskType.plan: ".opencode/prompts/test-planning.md", 
-                TaskType.generate: ".opencode/prompts/test-generation.md",
-                TaskType.fix: ".opencode/prompts/test-fixing.md",
+                TaskType.complete: ".opencode/prompts/tasks/complete-testing-workflow.md",
+                TaskType.plan: ".opencode/prompts/tasks/test-planning.md", 
+                TaskType.generate: ".opencode/prompts/tasks/test-generation.md",
+                TaskType.fix: ".opencode/prompts/tasks/test-fixing.md",
                 TaskType.custom: None  # Use instructions directly, no prompt file
             }
             
@@ -797,6 +815,20 @@ class AgentService:
                 # Add custom instructions if provided
                 if task.configuration.instructions:
                     instructions = f"{task.configuration.instructions}\n\n{instructions}"
+            
+            # Load and append authentication instructions if credentials are provided
+            if (task.configuration.sign_in and 
+                task.configuration.sign_in.method == SignInMethod.username_password and
+                task.configuration.sign_in.username and 
+                task.configuration.sign_in.password):
+                
+                auth_instructions = await self._load_authentication_prompt(
+                    task.configuration.sign_in.username,
+                    task.configuration.sign_in.password
+                )
+                if auth_instructions:
+                    instructions = f"{instructions}\n\n---\n\n{auth_instructions}"
+                    await self._send_debug(task.id, "Added authentication instructions to prompt")
             
             # Load and append phase tracking instructions
             phase_tracking_instructions = await self._load_phase_tracking_prompt()
