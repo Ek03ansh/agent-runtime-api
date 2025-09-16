@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 from datetime import datetime
 from enum import Enum
 
@@ -23,6 +23,11 @@ class TaskPhase(str, Enum):
     generating_tests = "generating_tests"
     fixing_tests = "fixing_tests"
 
+class ArtifactType(str, Enum):
+    plan_phase = "plan_phase"
+    generation_phase = "generation_phase"
+    complete = "complete"
+
 class SignInMethod(str, Enum):
     none = "none"
     username_password = "username-password"
@@ -36,7 +41,7 @@ class ArtifactsUrl(BaseModel):
     sas_url: str = Field(..., description="SAS URL for Azure Storage container with write permissions")
 
 class UploadedArtifacts(BaseModel):
-    blob_url: str = Field(..., description="Direct URL to the uploaded ZIP file in Azure Storage")
+    blob_url: str = Field(..., description="Direct URL to the uploaded file in Azure Storage")
     blob_name: str = Field(..., description="Name of the uploaded blob/file")
     uploaded_at: datetime = Field(..., description="Timestamp when upload completed")
     file_size: int = Field(..., description="Size of uploaded file in bytes")
@@ -74,7 +79,7 @@ class Task(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
     artifacts_url: Optional[ArtifactsUrl] = Field(default=None, description="Azure Storage SAS URL for artifacts")
-    uploaded_artifacts: Optional[UploadedArtifacts] = Field(default=None, description="Details of uploaded artifacts")
+    uploaded_artifacts: Dict[ArtifactType, UploadedArtifacts] = Field(default_factory=dict, description="Details of uploaded artifacts by phase")
     
     # Internal tracking fields (not exposed in API responses)
     error: Optional[str] = Field(default=None, description="Error message if task failed")
@@ -95,7 +100,7 @@ class TaskResponse(BaseModel):
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: Optional[datetime] = Field(default=None, description="Task completion timestamp")
     artifacts_url: Optional[ArtifactsUrl] = Field(default=None, description="Azure Storage SAS URL for artifacts")
-    uploaded_artifacts: Optional[UploadedArtifacts] = Field(default=None, description="Details of uploaded artifacts")
+    uploaded_artifacts: Dict[ArtifactType, UploadedArtifacts] = Field(default_factory=dict, description="Details of uploaded artifacts by phase")
     error: Optional[str] = Field(default=None, description="Error message if task failed")
     
     @classmethod

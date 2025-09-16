@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from app.utils.file_utils import should_exclude_path
 
-from app.models import Task, TaskType, TaskStatus, TaskPhase, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts, SignInMethod
+from app.models import Task, TaskType, TaskStatus, TaskPhase, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts, SignInMethod, ArtifactType
 from app.services.azure_storage_service import AzureStorageService
 from app.core.config import settings
 
@@ -190,6 +190,7 @@ class AgentService:
                     try:
                         new_phase = TaskPhase(phase_str)
                         if new_phase != task.current_phase:
+                            old_phase = task.current_phase
                             task.current_phase = new_phase
                             task.updated_at = datetime.now()
                             
@@ -202,6 +203,16 @@ class AgentService:
                                 )
                             except Exception as e:
                                 logger.warning(f"Failed to send phase update via WebSocket: {e}")
+                            
+                            # Upload artifacts when transitioning from planning to generation or generation to fixing
+                            if old_phase == TaskPhase.planning and new_phase == TaskPhase.generating_tests:
+                                # Only upload if not already uploaded
+                                if ArtifactType.plan_phase not in task.uploaded_artifacts:
+                                    await self._upload_phase_artifacts(task, ArtifactType.plan_phase)
+                            elif old_phase == TaskPhase.generating_tests and new_phase == TaskPhase.fixing_tests:
+                                # Only upload if not already uploaded
+                                if ArtifactType.generation_phase not in task.uploaded_artifacts:
+                                    await self._upload_phase_artifacts(task, ArtifactType.generation_phase)
                     except ValueError:
                         logger.warning(f"Invalid phase value in status file: {phase_str}")
                 
@@ -239,84 +250,110 @@ class AgentService:
             # Check every 1 second for responsive user experience
             await asyncio.sleep(1)
     
-    async def _auto_upload_artifacts(self, task: Task) -> Optional[UploadedArtifacts]:
+
+    async def _upload_phase_artifacts(self, task: Task, artifact_type: ArtifactType) -> Optional[UploadedArtifacts]:
         """
-        Auto-upload task artifacts to Azure Storage if artifacts_url is provided
+        Upload artifacts for a specific phase to Azure Storage
         
         Args:
-            task: The completed task
+            task: The task object
+            artifact_type: Type of artifact (plan_phase, generation_phase, complete)
             
         Returns:
             UploadedArtifacts object if upload was successful, None otherwise
         """
         if not task.artifacts_url:
-            logger.debug(f"No artifacts_url provided for task {task.id}, skipping auto-upload")
+            logger.debug(f"No artifacts_url provided for task {task.id}, skipping phase upload")
             return None
             
         try:
-            
             # Validate SAS URL format
             if not AzureStorageService.validate_sas_url(task.artifacts_url.sas_url):
-                logger.warning(f"Invalid SAS URL format for task {task.id}, skipping auto-upload")
-                task.error = f"{task.error}\nNote: Invalid SAS URL, artifacts not uploaded" if task.error else "Invalid SAS URL, artifacts not uploaded"
+                logger.warning(f"Invalid SAS URL format for task {task.id}, skipping phase upload")
                 return None
             
-            await self._send_debug(task.id, "Starting auto-upload of artifacts to Azure Storage...")
+            await self._send_debug(task.id, f"Starting upload of {artifact_type.value} artifacts to Azure Storage...")
             
-            # Create ZIP of session directory (reuse existing logic from session controller)
+            # Create ZIP of session directory
             session_path = Path(task.session_path)
             if not session_path.exists():
                 logger.warning(f"Session path not found for task {task.id}: {session_path}")
                 return None
             
-            # Create temporary ZIP file
-            temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-            zip_path = temp_zip.name
-            temp_zip.close()
-            
-            try:
-                # Create ZIP file with session contents
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for file_path in session_path.rglob("*"):
-                        if file_path.is_file() and not self._should_exclude_path(file_path):
-                            try:
-                                relative_path = file_path.relative_to(session_path)
-                                zipf.write(file_path, relative_path)
-                            except (OSError, PermissionError):
-                                continue
-                
-                # Generate blob name with timestamp
+            if artifact_type == ArtifactType.plan_phase:
+                # For plan phase, upload the test plan file directly (no ZIP needed)
+                plan_file = session_path / "specs" / "test-plan.md"
+                if not plan_file.exists():
+                    logger.warning(f"Test plan file not found at {plan_file}")
+                    return None
+                    
+                # Generate blob name with phase and timestamp  
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                blob_name = f"session_{task.session_id}_{timestamp}.zip"
+                blob_name = f"session_{task.session_id}_{artifact_type.value}_{timestamp}.md"
                 
-                # Upload to Azure Storage
-                zip_file_path = Path(zip_path)
+                # Upload test plan directly to Azure Storage
                 blob_url = await AzureStorageService.upload_file_to_sas_url(
-                    file_path=zip_file_path,
+                    file_path=plan_file,
                     sas_url=task.artifacts_url.sas_url,
                     blob_name=blob_name
                 )
                 
-                file_size = zip_file_path.stat().st_size
-                await self._send_debug(task.id, f"Successfully uploaded artifacts: {blob_name} ({file_size} bytes)")
+                file_size = plan_file.stat().st_size
                 
-                # Return UploadedArtifacts object with full details
-                return UploadedArtifacts(
-                    blob_url=blob_url,
-                    blob_name=blob_name,
-                    uploaded_at=datetime.now(),
-                    file_size=file_size
-                )
+            else:
+                # For generation and complete phases, create ZIP with session contents
+                temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+                zip_path = temp_zip.name
+                temp_zip.close()
                 
-            finally:
-                # Clean up temporary ZIP file
-                Path(zip_path).unlink(missing_ok=True)
+                try:
+                    # Create ZIP file with entire session contents
+                    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                        for file_path in session_path.rglob("*"):
+                            if file_path.is_file() and not self._should_exclude_path(file_path):
+                                try:
+                                    relative_path = file_path.relative_to(session_path)
+                                    zipf.write(file_path, relative_path)
+                                except (OSError, PermissionError):
+                                    continue
+                    
+                    # Generate blob name with phase and timestamp
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    blob_name = f"session_{task.session_id}_{artifact_type.value}_{timestamp}.zip"
+                    
+                    # Upload to Azure Storage
+                    zip_file_path = Path(zip_path)
+                    blob_url = await AzureStorageService.upload_file_to_sas_url(
+                        file_path=zip_file_path,
+                        sas_url=task.artifacts_url.sas_url,
+                        blob_name=blob_name
+                    )
+                    
+                    file_size = zip_file_path.stat().st_size
+                    
+                finally:
+                    # Clean up temporary ZIP file
+                    Path(zip_path).unlink(missing_ok=True)
+            
+            await self._send_debug(task.id, f"Successfully uploaded {artifact_type.value} artifacts: {blob_name} ({file_size} bytes)")
+            
+            # Create UploadedArtifacts object
+            uploaded_artifact = UploadedArtifacts(
+                blob_url=blob_url,
+                blob_name=blob_name,
+                uploaded_at=datetime.now(),
+                file_size=file_size
+            )
+            
+            # Add to task's uploaded_artifacts dictionary
+            task.uploaded_artifacts[artifact_type] = uploaded_artifact
+            task.updated_at = datetime.now()
+            
+            return uploaded_artifact
                 
         except Exception as e:
-            logger.error(f"Failed to auto-upload artifacts for task {task.id}: {e}")
-            await self._send_debug(task.id, f"Auto-upload failed: {str(e)}", level="ERROR")
-            # Don't fail the task, just log the upload failure
-            task.error = f"{task.error}\nNote: Artifact upload failed: {str(e)}" if task.error else f"Artifact upload failed: {str(e)}"
+            logger.error(f"Failed to upload {artifact_type.value} artifacts for task {task.id}: {e}")
+            await self._send_debug(task.id, f"Phase upload failed: {str(e)}", level="ERROR")
             return None
     
     def _should_exclude_path(self, file_path: Path) -> bool:
@@ -501,10 +538,8 @@ class AgentService:
                 task.error = error_detail or "Task execution failed with unknown error"
             
             # Auto-upload artifacts if artifacts_url is provided (for both success and failure)
-            uploaded_artifacts = await self._auto_upload_artifacts(task)
+            uploaded_artifacts = await self._upload_phase_artifacts(task, ArtifactType.complete)
             if uploaded_artifacts:
-                # Store uploaded artifacts details in separate field (preserving original SAS URL)
-                task.uploaded_artifacts = uploaded_artifacts
                 logger.info(f"Task {task.id} artifacts uploaded to: {uploaded_artifacts.blob_url}")
             
             task.updated_at = datetime.now()
@@ -516,10 +551,8 @@ class AgentService:
             task.error = f"Task execution exception: {str(e)} (Type: {type(e).__name__})\nTraceback: {tb}"
             
             # Auto-upload artifacts even on exception (partial artifacts may be useful)
-            uploaded_artifacts = await self._auto_upload_artifacts(task)
+            uploaded_artifacts = await self._upload_phase_artifacts(task, ArtifactType.complete)
             if uploaded_artifacts:
-                # Store uploaded artifacts details in separate field (preserving original SAS URL)
-                task.uploaded_artifacts = uploaded_artifacts
                 logger.info(f"Task {task.id} artifacts uploaded after exception to: {uploaded_artifacts.blob_url}")
             
             task.updated_at = datetime.now()
