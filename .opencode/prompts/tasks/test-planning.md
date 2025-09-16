@@ -2,4 +2,4 @@
 
 Create a test plan for **{app_url}**.
 
-@playwright-test-planner analyze '{app_url}' and save the test plan as `specs/test-plan.md`.
+@playwright-test-planner analyze '{app_url}' and save the test plan as `specs/test-plan.md` (EXACT filename and location required).

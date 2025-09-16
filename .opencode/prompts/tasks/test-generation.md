@@ -2,4 +2,4 @@
 
 Generate Playwright tests for **{app_url}**.
 
-@playwright-test-generator read `specs/test-plan.md` and create test files in the `tests/` folder.
+@playwright-test-generator read `specs/test-plan.md` and create test files ONLY in the `tests/` folder (no subfolders, no other locations).
