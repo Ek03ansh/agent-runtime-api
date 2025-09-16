@@ -22,7 +22,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # Constants
-OPENCODE_TIMEOUT_SECONDS = 7200  # 2 hours
+OPENCODE_TIMEOUT_SECONDS = 14400  # 4 hours
 APP_HASH_LENGTH = 12  # Characters for app workspace hash
 
 
@@ -236,8 +236,8 @@ class AgentService:
             except Exception as e:
                 logger.debug(f"Error reading status files: {e}")
             
-            # Check every 2 seconds
-            await asyncio.sleep(2)
+            # Check every 1 second for responsive user experience
+            await asyncio.sleep(1)
     
     async def _auto_upload_artifacts(self, task: Task) -> Optional[UploadedArtifacts]:
         """
@@ -920,7 +920,7 @@ class AgentService:
             await self._send_debug(task.id, f"About to execute command: {' '.join(cmd_args)}", agent=primary_agent)
             await self._send_debug(task.id, f"Working directory: {session_path}", agent=primary_agent)
             
-            # Simple subprocess execution - works reliably on Linux
+            # Simple subprocess execution
             await self._send_debug(task.id, "Starting OpenCode subprocess...", agent=primary_agent)
             
             # Use asyncio.create_subprocess_exec for clean async subprocess handling
