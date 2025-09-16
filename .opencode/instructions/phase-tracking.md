@@ -7,9 +7,11 @@ Create `status/phase.json` with EXACTLY this structure:
 ```json
 {
   "current_phase": "planning",
-  "updated_at": "2025-09-15T10:30:00Z"
+  "updated_at": "2025-09-17T14:30:00Z"
 }
 ```
+
+**IMPORTANT:** Always use the CURRENT real timestamp, not example timestamps from this instruction.
 
 **Update `current_phase` to:**
 - `"planning"` when using `@playwright-test-planner`

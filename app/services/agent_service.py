@@ -121,25 +121,11 @@ class AgentService:
             logger.info(message)
         else:
             logger.debug(message)
-    
-    async def _load_phase_tracking_prompt(self) -> str:
-        """Load the phase tracking prompt from file"""
-        try:
-            phase_tracking_path = Path(".opencode/prompts/system/phase-tracking.md")
-            if phase_tracking_path.exists():
-                with open(phase_tracking_path, 'r', encoding='utf-8') as f:
-                    return f.read()
-            else:
-                logger.warning("Phase tracking prompt file not found")
-                return ""
-        except Exception as e:
-            logger.warning(f"Failed to load phase tracking prompt: {e}")
-            return ""
-    
+      
     async def _load_authentication_prompt(self, username: str, password: str) -> str:
         """Load and customize the authentication prompt with credentials"""
         try:
-            auth_prompt_path = Path(".opencode/prompts/system/authentication.md")
+            auth_prompt_path = Path(".opencode/prompts/runtime/authentication.md")
             if auth_prompt_path.exists():
                 with open(auth_prompt_path, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -154,19 +140,7 @@ class AgentService:
             logger.warning(f"Failed to load authentication prompt: {e}")
             return ""
     
-    async def _load_user_status_updates_prompt(self) -> str:
-        """Load the user status updates prompt from file"""
-        try:
-            user_status_path = Path(".opencode/prompts/system/user-status-updates.md")
-            if user_status_path.exists():
-                with open(user_status_path, 'r', encoding='utf-8') as f:
-                    return f.read()
-            else:
-                logger.warning("User status updates prompt file not found")
-                return ""
-        except Exception as e:
-            logger.warning(f"Failed to load user status updates prompt: {e}")
-            return ""
+    # Removed _load_user_status_updates_prompt - now handled by OpenCode instructions field
     
     async def _monitor_phase_status_file(self, task_id: str):
         """Monitor the phase status file and activity log for updates"""
@@ -907,18 +881,6 @@ class AgentService:
                 if auth_instructions:
                     instructions = f"{instructions}\n\n---\n\n{auth_instructions}"
                     await self._send_debug(task.id, "Added authentication instructions to prompt")
-            
-            # Load and append phase tracking instructions
-            phase_tracking_instructions = await self._load_phase_tracking_prompt()
-            if phase_tracking_instructions:
-                instructions = f"{instructions}\n\n---\n\n{phase_tracking_instructions}"
-                await self._send_debug(task.id, "Added phase tracking instructions to prompt")
-            
-            # Load and append user status updates instructions
-            user_status_instructions = await self._load_user_status_updates_prompt()
-            if user_status_instructions:
-                instructions = f"{instructions}\n\n---\n\n{user_status_instructions}"
-                await self._send_debug(task.id, "Added user status updates instructions to prompt")
             
             # Build command with hardcoded GitHub Copilot configuration
             model_identifier = f"{settings.provider}/{settings.model}"  # github-copilot/claude-sonnet-4
