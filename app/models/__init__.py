@@ -66,6 +66,7 @@ class Task(BaseModel):
     task_type: TaskType = Field(..., description="Type of task")
     status: TaskStatus = Field(..., description="Current task status")
     current_phase: TaskPhase = Field(default=TaskPhase.planning, description="Current execution phase")
+    current_activity: Optional[str] = Field(default=None, description="Current user-friendly activity description")
     configuration: TaskConfiguration = Field(..., description="Task configuration")
     session_path: str = Field(..., description="Path to task session directory")
     session_id: str = Field(..., description="OpenCode session ID for multi-agent tasks")
@@ -86,6 +87,7 @@ class TaskResponse(BaseModel):
     task_type: TaskType = Field(..., description="Type of task")
     status: TaskStatus = Field(..., description="Current task status")
     current_phase: TaskPhase = Field(..., description="Current execution phase")
+    current_activity: Optional[str] = Field(default=None, description="Current user-friendly activity description")
     configuration: TaskConfiguration = Field(..., description="Task configuration")
     session_path: str = Field(..., description="Path to task session directory")
     session_id: str = Field(..., description="OpenCode session ID for multi-agent tasks")
@@ -104,6 +106,7 @@ class TaskResponse(BaseModel):
             task_type=task.task_type,
             status=task.status,
             current_phase=task.current_phase,
+            current_activity=task.current_activity,
             configuration=task.configuration,
             session_path=task.session_path,
             session_id=task.session_id,

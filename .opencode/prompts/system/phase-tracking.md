@@ -1,6 +1,8 @@
 # Phase Tracking
 
-**REQUIRED:** Create `status/phase.json` with EXACTLY this structure:
+**REQUIRED:** Track which phase of the testing workflow you're currently in.
+
+Create `status/phase.json` with EXACTLY this structure:
 
 ```json
 {

@@ -154,18 +154,35 @@ class AgentService:
             logger.warning(f"Failed to load authentication prompt: {e}")
             return ""
     
+    async def _load_user_status_updates_prompt(self) -> str:
+        """Load the user status updates prompt from file"""
+        try:
+            user_status_path = Path(".opencode/prompts/system/user-status-updates.md")
+            if user_status_path.exists():
+                with open(user_status_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            else:
+                logger.warning("User status updates prompt file not found")
+                return ""
+        except Exception as e:
+            logger.warning(f"Failed to load user status updates prompt: {e}")
+            return ""
+    
     async def _monitor_phase_status_file(self, task_id: str):
-        """Monitor the phase status file and update task accordingly"""
+        """Monitor the phase status file and activity log for updates"""
         task = self.tasks.get(task_id)
         if not task:
             return
         
-        status_file_path = Path(task.session_path) / "status" / "phase.json"
+        phase_file_path = Path(task.session_path) / "status" / "phase.json"
+        activity_log_path = Path(task.session_path) / "status" / "activity_log.json"
+        last_activity_count = 0
         
         while task.status == TaskStatus.running:
             try:
-                if status_file_path.exists():
-                    with open(status_file_path, 'r', encoding='utf-8') as f:
+                # Monitor phase changes
+                if phase_file_path.exists():
+                    with open(phase_file_path, 'r', encoding='utf-8') as f:
                         status_data = json.load(f)
                     
                     # Update task with phase information
@@ -187,9 +204,37 @@ class AgentService:
                                 logger.warning(f"Failed to send phase update via WebSocket: {e}")
                     except ValueError:
                         logger.warning(f"Invalid phase value in status file: {phase_str}")
+                
+                # Monitor activity log for new user-friendly updates
+                if activity_log_path.exists():
+                    try:
+                        with open(activity_log_path, 'r', encoding='utf-8') as f:
+                            activity_data = json.load(f)
+                        
+                        activities = activity_data.get('activities', [])
+                        current_activity_count = len(activities)
+                        
+                        # Check for new activities
+                        if current_activity_count > last_activity_count and activities:
+                            # Get the latest activity
+                            latest_activity = activities[-1]
+                            message = latest_activity.get('message', '')
+                            
+                            if message:
+                                # Update task with current activity
+                                task.current_activity = message
+                                task.updated_at = datetime.now()
+                                
+                                # Send as a user-friendly status update
+                                await self._send_debug(task_id, f"🤖 {message}", level="INFO")
+                            
+                            last_activity_count = current_activity_count
+                                
+                    except (json.JSONDecodeError, Exception) as e:
+                        logger.debug(f"Error reading activity log file: {e}")
                         
             except Exception as e:
-                logger.debug(f"Error reading phase status file: {e}")
+                logger.debug(f"Error reading status files: {e}")
             
             # Check every 2 seconds
             await asyncio.sleep(2)
@@ -835,6 +880,12 @@ class AgentService:
             if phase_tracking_instructions:
                 instructions = f"{instructions}\n\n---\n\n{phase_tracking_instructions}"
                 await self._send_debug(task.id, "Added phase tracking instructions to prompt")
+            
+            # Load and append user status updates instructions
+            user_status_instructions = await self._load_user_status_updates_prompt()
+            if user_status_instructions:
+                instructions = f"{instructions}\n\n---\n\n{user_status_instructions}"
+                await self._send_debug(task.id, "Added user status updates instructions to prompt")
             
             # Build command with hardcoded GitHub Copilot configuration
             model_identifier = f"{settings.provider}/{settings.model}"  # github-copilot/claude-sonnet-4
