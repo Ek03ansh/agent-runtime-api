@@ -22,7 +22,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # Constants
-OPENCODE_TIMEOUT_SECONDS = 1800  # 30 minutes (reduced for Container Apps compatibility)
+OPENCODE_TIMEOUT_SECONDS = 7200  # 2 hours
 APP_HASH_LENGTH = 12  # Characters for app workspace hash
 
 
@@ -993,27 +993,6 @@ class AgentService:
             
             # Note: Output is already streamed in real-time above, no need to log it again here
             if returncode != 0:
-                # Special handling for exit code -15 (SIGTERM) - often indicates external termination
-                # after successful completion (e.g., container timeout, session cleanup)
-                if returncode == -15:
-                    await self._send_debug(task.id, f"Process terminated with SIGTERM (-15), likely due to container/session timeout", "WARNING", agent=primary_agent)
-                    
-                    # Check if substantial work was completed by looking for artifacts
-                    session_files_exist = any(session_path.rglob("*"))
-                    if session_files_exist:
-                        await self._send_debug(task.id, f"Artifacts found despite SIGTERM - treating as successful completion", "INFO", agent=primary_agent)
-                        # Treat as success since work was completed before termination
-                        await self._send_debug(task.id, f"Agent '{primary_agent}' completed with artifacts (terminated by platform)", agent=primary_agent)
-                        
-                        # Send completion notification via WebSocket
-                        try:
-                            await self.websocket_manager.send_completion(task.id, True)
-                        except Exception as e:
-                            logger.warning(f"Failed to send completion via WebSocket: {e}")
-                        
-                        await self._send_debug(task.id, "All agents completed successfully (despite platform termination)")
-                        return True, f"Completed successfully (terminated by platform timeout with exit code {returncode})"
-                
                 error_msg = f"Agent '{primary_agent}' failed with exit code {returncode}\n"
                 error_msg += f"Command: {' '.join(cmd_args)}\n"
                 error_msg += f"Working directory: {session_path}\n"
