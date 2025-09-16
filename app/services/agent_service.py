@@ -541,11 +541,6 @@ class AgentService:
             session_path.mkdir(parents=True, exist_ok=True)
             self._ensure_directory_permissions(session_path)
             
-            # Create status directory for phase tracking
-            status_dir = session_path / "status"
-            status_dir.mkdir(exist_ok=True)
-            self._ensure_directory_permissions(status_dir)
-            
             # Copy opencode.json from config directory to session
             session_config_path = session_path / "opencode.json"
             
