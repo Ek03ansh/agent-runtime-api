@@ -54,5 +54,5 @@ Thumbs.db
 
 # Sessions (runtime generated)
 /sessions/
-session_pool_results/
+session_pool_results*
 clients/prd.md

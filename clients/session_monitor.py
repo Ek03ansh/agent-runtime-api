@@ -14,12 +14,9 @@ from pathlib import Path
 from shared_config import get_bearer_token, DEPLOYMENTS
 
 # Hardcoded identifiers (used as both session_id and identifier)
+# To reduce to 1 pool, just comment out the others:
 IDENTIFIERS = [
-    "test-pool-1",
-    "test-pool-2", 
-    "test-pool-3",
-    "test-pool-4",
-    "test-pool-5"
+    "test-pool-a"
 ]
 
 class SimpleSessionMonitor:
@@ -139,7 +136,7 @@ class SimpleSessionMonitor:
     def check_task_status(self, task_id):
         task_info = self.active_tasks.get(task_id)
         if not task_info:
-            return
+            return None
         
         identifier = task_info['identifier']
         
@@ -151,7 +148,16 @@ class SimpleSessionMonitor:
                 timeout=30
             )
             
-            print(f"   📊 {identifier}: Status {response.status_code}")
+            # Parse response to check task status
+            task_status = None
+            if response.status_code == 200:
+                try:
+                    response_data = response.json()
+                    task_status = response_data.get('status', 'unknown')
+                except json.JSONDecodeError:
+                    task_status = 'unknown'
+            
+            print(f"   📊 {identifier}: HTTP {response.status_code}, Task Status: {task_status}")
             
             # Store raw response for file saving
             task_info['raw_response'] = {
@@ -159,6 +165,8 @@ class SimpleSessionMonitor:
                 'response_text': response.text,
                 'timestamp': datetime.now().isoformat()
             }
+            
+            return task_status
                 
         except Exception as e:
             print(f"   ❌ Exception for {identifier}: {e}")
@@ -166,6 +174,7 @@ class SimpleSessionMonitor:
                 'error': str(e),
                 'timestamp': datetime.now().isoformat()
             }
+            return None
 
     def save_session_results(self, identifier):
         session_info = self.sessions[identifier]
@@ -223,22 +232,41 @@ class SimpleSessionMonitor:
     def monitor_all_tasks(self):
         if not self.active_tasks:
             print("   ℹ️ No active tasks to monitor")
-            return
+            return True  # All tasks are done
         
         print(f"\n🔍 Polling {len(self.active_tasks)} active tasks...")
         print("=" * 50)
         
+        completed_tasks = []
+        
         for task_id, task_info in self.active_tasks.items():
-            self.check_task_status(task_id)
+            task_status = self.check_task_status(task_id)
             identifier = task_info['identifier']
             self.save_session_results(identifier)
+            
+            # Check if task is completed or failed
+            if task_status in ['completed', 'failed']:
+                completed_tasks.append(task_id)
+                print(f"   ✅ Task {identifier} finished with status: {task_status}")
+        
+        # Remove completed/failed tasks from active monitoring
+        for task_id in completed_tasks:
+            del self.active_tasks[task_id]
+        
+        # Return True if all tasks are done
+        return len(self.active_tasks) == 0
 
     def run(self):
         print("🔄 Starting monitoring loop (Ctrl+C to stop)")
         
         try:
             while True:
-                self.monitor_all_tasks()
+                all_done = self.monitor_all_tasks()
+                
+                if all_done:
+                    print("\n🎉 All tasks completed or failed - monitoring finished!")
+                    break
+                    
                 time.sleep(5)  # Poll every 5 seconds
                 
         except KeyboardInterrupt:
