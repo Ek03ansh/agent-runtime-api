@@ -52,7 +52,9 @@
         "read": true,
         "write": true,
         "edit": true,
-        "bash": true
+        "bash": true,
+        "todowrite": true,
+        "todoread": true
       }
     },
     "playwright-test-planner": {
@@ -64,7 +66,9 @@
         "edit": true,
         "grep": true,
         "glob": true,
-        "list": true
+        "list": true,
+        "todowrite": true,
+        "todoread": true
       }
     },
     "playwright-test-generator": {
@@ -77,7 +81,9 @@
         "edit": true,
         "grep": true,
         "glob": true,
-        "list": true
+        "list": true,
+        "todowrite": true,
+        "todoread": true
       }
     },
     "playwright-test-fixer": {
@@ -90,7 +96,9 @@
         "edit": true,
         "grep": true,
         "glob": true,
-        "list": true
+        "list": true,
+        "todowrite": true,
+        "todoread": true
       }
     }
   }
