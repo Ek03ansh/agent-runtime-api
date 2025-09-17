@@ -1,4 +1,4 @@
-# User Status Updates
+# Activity Log Updates
 
 ## Objective
 Keep users informed of progress by logging specific activities and actions taken during the testing workflow.
