@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from app.utils.file_utils import should_exclude_path
 
-from app.models import Task, TaskType, TaskStatus, TaskPhase, TaskConfiguration, SessionFile, ArtifactsUrl, UploadedArtifacts, SignInMethod, ArtifactType
+from app.models import Task, TaskType, TaskStatus, TaskPhase, TaskConfiguration, ArtifactsUrl, UploadedArtifacts, SignInMethod, ArtifactType
 from app.services.azure_storage_service import AzureStorageService
 from app.core.config import settings
 
@@ -139,9 +139,7 @@ class AgentService:
         except Exception as e:
             logger.warning(f"Failed to load authentication prompt: {e}")
             return ""
-    
-    # Removed _load_user_status_updates_prompt - now handled by OpenCode instructions field
-    
+        
     async def _monitor_phase_status_file(self, task_id: str):
         """Monitor the phase status file and activity log for updates"""
         task = self.tasks.get(task_id)
