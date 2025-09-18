@@ -13,6 +13,7 @@
         "--browser",
         "chromium",
         "--isolated",
+        "--no-sandbox",
         "--viewport-size=1280,720"
       ],
       "enabled": true
@@ -26,6 +27,7 @@
         "chromium",
         "--isolated",
         "--caps=verify",
+        "--no-sandbox",
         "--viewport-size=1280,720"
       ],
       "enabled": true
