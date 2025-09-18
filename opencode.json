@@ -40,6 +40,15 @@
         "run-mcp-server"
       ],
       "enabled": true
+    },
+    "playwright-runner": {
+      "type": "local",
+      "command": [
+        "npx",
+        "@playwright/test",
+        "run-mcp-server"
+      ],
+      "enabled": true
     }
   },
   "tools": {
@@ -90,6 +99,19 @@
       "mode": "subagent",
       "tools": {
         "playwright-fixer*": true,
+        "read": true,
+        "write": true,
+        "edit": true,
+        "grep": true,
+        "glob": true,
+        "list": true
+      }
+    },
+    "playwright-test-runner": {
+      "description": "Use this agent when you need to execute Playwright tests and generate video recordings with comprehensive test artifacts. Examples: <example>Context: All tests have been created and fixed, now need to run them with video recording for final validation. user: 'Run all the tests and generate videos for documentation' assistant: 'I'll use the playwright-test-runner agent to execute all tests with video recording enabled and generate comprehensive test artifacts.' <commentary>The user needs final test execution with video recording and reporting, which is exactly what the playwright-test-runner agent is designed for.</commentary></example> <example>Context: Need to validate the complete test suite and produce publishable test results. user: 'Execute the full test suite and create test artifacts' assistant: 'Let me use the playwright-test-runner agent to run all tests and generate videos and reports for publication.' <commentary>This requires comprehensive test execution with artifact generation, perfect for the playwright-test-runner agent.</commentary></example>",
+      "mode": "subagent",
+      "tools": {
+        "playwright-runner*": true,
         "read": true,
         "write": true,
         "edit": true,
