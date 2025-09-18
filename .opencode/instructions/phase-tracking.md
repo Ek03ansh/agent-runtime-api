@@ -13,6 +13,7 @@ Create and maintain `status/phase.json` with the current workflow phase and upda
   - `"planning"` - when starting @playwright-test-planner
   - `"generating_tests"` - when starting @playwright-test-generator  
   - `"fixing_tests"` - when starting @playwright-test-fixer
+  - `"running_tests"` - when starting @playwright-test-runner
 
 ## Output
 

@@ -23,10 +23,12 @@ class TaskPhase(str, Enum):
     planning = "planning"
     generating_tests = "generating_tests"
     fixing_tests = "fixing_tests"
+    running_tests = "running_tests"
 
 class ArtifactType(str, Enum):
     plan_phase = "plan_phase"
     generation_phase = "generation_phase"
+    fixing_phase = "fixing_phase"
     complete = "complete"
 
 class SignInMethod(str, Enum):

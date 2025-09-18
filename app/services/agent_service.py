@@ -176,7 +176,7 @@ class AgentService:
                             except Exception as e:
                                 logger.warning(f"Failed to send phase update via WebSocket: {e}")
                             
-                            # Upload artifacts when transitioning from planning to generation or generation to fixing
+                            # Upload artifacts when transitioning between phases
                             if old_phase == TaskPhase.planning and new_phase == TaskPhase.generating_tests:
                                 # Only upload if not already uploaded
                                 if ArtifactType.plan_phase not in task.uploaded_artifacts:
@@ -185,6 +185,10 @@ class AgentService:
                                 # Only upload if not already uploaded
                                 if ArtifactType.generation_phase not in task.uploaded_artifacts:
                                     await self._upload_phase_artifacts(task, ArtifactType.generation_phase)
+                            elif old_phase == TaskPhase.fixing_tests and new_phase == TaskPhase.running_tests:
+                                # Only upload if not already uploaded
+                                if ArtifactType.fixing_phase not in task.uploaded_artifacts:
+                                    await self._upload_phase_artifacts(task, ArtifactType.fixing_phase)
                     except ValueError:
                         logger.warning(f"Invalid phase value in status file: {phase_str}")
                 
