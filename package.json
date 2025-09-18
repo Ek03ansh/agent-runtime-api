@@ -3,15 +3,12 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "setup": "sudo npm install -g opencode-ai && npm install && npx playwright install chromium && npx playwright install-deps",
-    "setup:docker": "npm install -g opencode-ai && npm install && npx playwright install-deps chromium",
+    "setup": "sudo npm install -g opencode-ai && npm install && npx playwright install chromium && npx playwright install-deps chromium",
+    "setup:docker": "npm install -g opencode-ai && npm install && npx playwright install chromium && npx playwright install-deps chromium",
     "install-browsers": "npx playwright install chromium",
-    "install-deps": "npx playwright install-deps",
+    "install-deps": "npx playwright install-deps chromium",
     "verify": "opencode --version",
-    "check": "python setup_check.py",
-    "dev": "python main.py",
-    "test": "python test_agent_api.py test",
-    "test:create": "python test_agent_api.py create complete"
+    "dev": "python main.py"
   },
   "keywords": [
     "opencode",

@@ -43,6 +43,7 @@
   "tools": {
     "playwright*": false
   },
+  "model": "github-copilot/claude-sonnet-4",
   "agent": {
     "build": {
       "description": "Main agent for orchestrating playwright testing workflows",
@@ -66,9 +67,7 @@
         "edit": true,
         "grep": true,
         "glob": true,
-        "list": true,
-        "todowrite": true,
-        "todoread": true
+        "list": true
       }
     },
     "playwright-test-generator": {
@@ -81,9 +80,7 @@
         "edit": true,
         "grep": true,
         "glob": true,
-        "list": true,
-        "todowrite": true,
-        "todoread": true
+        "list": true
       }
     },
     "playwright-test-fixer": {
@@ -96,9 +93,7 @@
         "edit": true,
         "grep": true,
         "glob": true,
-        "list": true,
-        "todowrite": true,
-        "todoread": true
+        "list": true
       }
     }
   }

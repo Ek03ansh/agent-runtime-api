@@ -147,7 +147,7 @@ class AgentService:
             return
         
         phase_file_path = Path(task.session_path) / "status" / "phase.json"
-        activity_log_path = Path(task.session_path) / "status" / "activity_log.json"
+        activity_stream_path = Path(task.session_path) / "status" / "activity_stream.log"
         last_activity_count = 0
         
         while task.status == TaskStatus.running:
@@ -188,33 +188,37 @@ class AgentService:
                     except ValueError:
                         logger.warning(f"Invalid phase value in status file: {phase_str}")
                 
-                # Monitor activity log for new user-friendly updates
-                if activity_log_path.exists():
+                # Monitor activity stream for new user-friendly updates
+                if activity_stream_path.exists():
                     try:
-                        with open(activity_log_path, 'r', encoding='utf-8') as f:
-                            activity_data = json.load(f)
+                        with open(activity_stream_path, 'r', encoding='utf-8') as f:
+                            activity_lines = f.readlines()
                         
-                        activities = activity_data.get('activities', [])
-                        current_activity_count = len(activities)
+                        current_activity_count = len(activity_lines)
                         
                         # Check for new activities
-                        if current_activity_count > last_activity_count and activities:
-                            # Get the latest activity
-                            latest_activity = activities[-1]
-                            message = latest_activity.get('message', '')
+                        if current_activity_count > last_activity_count and activity_lines:
+                            # Get the latest activity line
+                            latest_line = activity_lines[-1].strip()
                             
-                            if message:
-                                # Update task with current activity
-                                task.current_activity = message
-                                task.updated_at = datetime.now()
-                                
-                                # Send as a user-friendly status update
-                                await self._send_debug(task_id, f"🤖 {message}", level="INFO")
+                            if latest_line:
+                                # Extract message from format: [HH:MM:SS] message
+                                import re
+                                match = re.match(r'\[(\d{2}:\d{2}:\d{2})\]\s*(.*)', latest_line)
+                                if match:
+                                    timestamp, message = match.groups()
+                                    
+                                    # Update task with current activity
+                                    task.current_activity = message
+                                    task.updated_at = datetime.now()
+                                    
+                                    # Send as a user-friendly status update
+                                    await self._send_debug(task_id, f"🤖 {message}", level="INFO")
                             
                             last_activity_count = current_activity_count
                                 
-                    except (json.JSONDecodeError, Exception) as e:
-                        logger.debug(f"Error reading activity log file: {e}")
+                    except Exception as e:
+                        logger.debug(f"Error reading activity stream file: {e}")
                         
             except Exception as e:
                 logger.debug(f"Error reading status files: {e}")
@@ -535,6 +539,12 @@ class AgentService:
         try:
             session_path = Path(task.session_path)
             
+            # Validate configuration paths before proceeding
+            path_validation = settings.validate_paths()
+            if not path_validation["node_dependencies"]:
+                missing_paths = [k for k, v in path_validation.items() if not v and k in ["package_json", "node_modules"]]
+                logger.warning(f"Missing Node.js dependencies: {missing_paths}")
+            
             # Ensure session directory exists with proper permissions
             session_path.mkdir(parents=True, exist_ok=True)
             self._ensure_directory_permissions(session_path)
@@ -556,6 +566,37 @@ class AgentService:
                 self._safe_copy_tree(project_opencode_dir, session_opencode_dir)
             else:
                 logger.info(f"No .opencode directory found at {settings.opencode_dir} - using OpenCode defaults")
+            
+            # CRITICAL: Copy Node.js dependencies for OpenCode MCP tools
+            # OpenCode runs from session directory and needs package.json + node_modules
+            
+            # Copy package.json to session (using configured path)
+            session_package_json = session_path / "package.json"
+            
+            if settings.package_json_path.exists():
+                self._safe_copy_file(settings.package_json_path, session_package_json)
+                logger.info(f"Copied package.json from {settings.package_json_path} to session directory")
+            else:
+                logger.warning(f"package.json not found at configured path: {settings.package_json_path}")
+            
+            # Copy package-lock.json to session (CRITICAL for exact dependency versions)
+            session_package_lock = session_path / "package-lock.json"
+            
+            if settings.package_lock_path.exists():
+                self._safe_copy_file(settings.package_lock_path, session_package_lock)
+                logger.info(f"Copied package-lock.json from {settings.package_lock_path} to session directory")
+            else:
+                logger.warning(f"package-lock.json not found at configured path: {settings.package_lock_path} - dependency versions may not be exact")
+            
+            # Copy node_modules to session (CRITICAL for MCP dependencies, using configured path)
+            session_node_modules = session_path / "node_modules"
+            
+            if settings.node_modules_path.exists():
+                logger.info(f"Copying node_modules from {settings.node_modules_path} to session directory (this may take a moment)...")
+                self._safe_copy_tree(settings.node_modules_path, session_node_modules)
+                logger.info(f"Successfully copied node_modules to session directory")
+            else:
+                logger.warning(f"node_modules not found at configured path: {settings.node_modules_path} - OpenCode MCP tools may fail")
             
         except Exception as e:
             raise Exception(f"Failed to create session configuration: {str(e)}")
@@ -875,9 +916,6 @@ class AgentService:
                     instructions = f"{instructions}\n\n---\n\n{auth_instructions}"
                     await self._send_debug(task.id, "Added authentication instructions to prompt")
             
-            # Build command with hardcoded GitHub Copilot configuration
-            model_identifier = f"{settings.provider}/{settings.model}"  # github-copilot/claude-sonnet-4
-            
             # Use build agent for all task types with appropriate instructions
             cmd_args = [
                 settings.opencode_command, 
@@ -886,7 +924,6 @@ class AgentService:
                 "--log-level", settings.opencode_log_level,  # Use configurable log level from environment
                 "--session", task.session_id,  # Use the pre-created session
                 "--agent", primary_agent,
-                "-m", model_identifier,
                 instructions
             ]
             await self._send_debug(task.id, f"Using {primary_agent} agent for {task.task_type} workflow with session {task.session_id}", agent=primary_agent)

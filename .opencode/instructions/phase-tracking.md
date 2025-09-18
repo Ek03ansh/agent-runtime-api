@@ -13,13 +13,11 @@ Create and maintain `status/phase.json` with the current workflow phase and upda
   - `"planning"` - when starting @playwright-test-planner
   - `"generating_tests"` - when starting @playwright-test-generator  
   - `"fixing_tests"` - when starting @playwright-test-fixer
-- **Include update counter** (increment if file exists, or use 1)
 
 ## Output
 
 ```json
 {
-  "current_phase": "planning",
-  "update_count": 1
+  "current_phase": "planning"
 }
 ```
