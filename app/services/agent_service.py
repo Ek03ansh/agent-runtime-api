@@ -567,37 +567,6 @@ class AgentService:
             else:
                 logger.info(f"No .opencode directory found at {settings.opencode_dir} - using OpenCode defaults")
             
-            # CRITICAL: Copy Node.js dependencies for OpenCode MCP tools
-            # OpenCode runs from session directory and needs package.json + node_modules
-            
-            # Copy package.json to session (using configured path)
-            session_package_json = session_path / "package.json"
-            
-            if settings.package_json_path.exists():
-                self._safe_copy_file(settings.package_json_path, session_package_json)
-                logger.info(f"Copied package.json from {settings.package_json_path} to session directory")
-            else:
-                logger.warning(f"package.json not found at configured path: {settings.package_json_path}")
-            
-            # Copy package-lock.json to session (CRITICAL for exact dependency versions)
-            session_package_lock = session_path / "package-lock.json"
-            
-            if settings.package_lock_path.exists():
-                self._safe_copy_file(settings.package_lock_path, session_package_lock)
-                logger.info(f"Copied package-lock.json from {settings.package_lock_path} to session directory")
-            else:
-                logger.warning(f"package-lock.json not found at configured path: {settings.package_lock_path} - dependency versions may not be exact")
-            
-            # Copy node_modules to session (CRITICAL for MCP dependencies, using configured path)
-            session_node_modules = session_path / "node_modules"
-            
-            if settings.node_modules_path.exists():
-                logger.info(f"Copying node_modules from {settings.node_modules_path} to session directory (this may take a moment)...")
-                self._safe_copy_tree(settings.node_modules_path, session_node_modules)
-                logger.info(f"Successfully copied node_modules to session directory")
-            else:
-                logger.warning(f"node_modules not found at configured path: {settings.node_modules_path} - OpenCode MCP tools may fail")
-            
         except Exception as e:
             raise Exception(f"Failed to create session configuration: {str(e)}")
 
