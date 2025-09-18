@@ -80,7 +80,7 @@ Examples:
             # Complete payload with ALL fields (required + optional) - matches TaskRequest model
             payload = {
                 # Required fields
-                "task_type": "complete",  # Options: complete, plan, generate, fix, custom
+                "task_type": "run",  # Options: complete, plan, generate, fix, custom
                 "configuration": {
                     "app_url": "https://demo.playwright.dev/todomvc/#/",
                     "sign_in": {
@@ -88,9 +88,9 @@ Examples:
                         "username": None,
                         "password": None
                     },
-                    "instructions": ""
+                    "instructions": "Run only and only the todo-creation.spec.ts and no other test file"
                 },
-                "session_id": f"api-test-{int(time.time())}",
+                "session_id": "api-test-1758216341",
                 
                 # Optional field - Real SAS URL for all environments
                 "artifacts_url": {

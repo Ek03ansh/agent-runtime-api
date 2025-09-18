@@ -541,9 +541,7 @@ class AgentService:
             
             # Validate configuration paths before proceeding
             path_validation = settings.validate_paths()
-            if not path_validation["node_dependencies"]:
-                missing_paths = [k for k, v in path_validation.items() if not v and k in ["package_json", "node_modules"]]
-                logger.warning(f"Missing Node.js dependencies: {missing_paths}")
+            logger.debug(f"Path validation results: {path_validation}")
             
             # Ensure session directory exists with proper permissions
             session_path.mkdir(parents=True, exist_ok=True)
@@ -853,6 +851,7 @@ class AgentService:
                 TaskType.plan: ".opencode/prompts/tasks/test-planning.md", 
                 TaskType.generate: ".opencode/prompts/tasks/test-generation.md",
                 TaskType.fix: ".opencode/prompts/tasks/test-fixing.md",
+                TaskType.run: ".opencode/prompts/tasks/test-running.md",
                 TaskType.custom: None  # Use instructions directly, no prompt file
             }
             
